@@ -1631,18 +1631,25 @@ class DetailDialog:
         # actions at the bottom first, so the page can take whatever height is left. Two rows: they don't fit one line.
         bottom = tk.Frame(win, bg=c["bg"])
         bottom.pack(side="bottom", fill="x", padx=16, pady=(8, 12))
-        tools = tk.Frame(bottom, bg=c["bg"])
-        tools.pack(fill="x")
-        app._button(tools, "외부 편집기로 열기", lambda: app.edit_file(s)).pack(side="left")
-        app._button(tools, "폴더 열기", lambda: plat.open_folder(s["path"])).pack(side="left", padx=(8, 0))
-        app._button(tools, "이름 복사", lambda: app.copy(s["name"])).pack(side="left", padx=(8, 0))
+        # tools as an even 2-column grid (a row of four crowds the width); the destructive and closing actions sit apart below a rule
+        tools = [("외부 편집기로 열기", lambda: app.edit_file(s)), ("폴더 열기", lambda: plat.open_folder(s["path"])),
+                 ("이름 복사", lambda: app.copy(s["name"]))]
         if s["repo"]:
-            app._button(tools, "업데이트 확인", lambda: app.check_updates([s["repo"]])).pack(side="left", padx=(8, 0))
+            tools.append(("업데이트 확인", lambda: app.check_updates([s["repo"]])))
+        grid = tk.Frame(bottom, bg=c["bg"])
+        grid.pack(fill="x")
+        grid.grid_columnconfigure(0, weight=1, uniform="tool")
+        grid.grid_columnconfigure(1, weight=1, uniform="tool")
+        for i, (text, cmd) in enumerate(tools):
+            lone = i == len(tools) - 1 and i % 2 == 0  # an odd last one spans both columns instead of leaving a gap
+            app._button(grid, text, cmd).grid(row=i // 2, column=0 if lone else i % 2, columnspan=2 if lone else 1, sticky="ew",
+                                              padx=(0, 0 if i % 2 or lone else 6), pady=(0, 6))
+        tk.Frame(bottom, height=1, bg=c["line"]).pack(fill="x", pady=(6, 10))
         ends = tk.Frame(bottom, bg=c["bg"])
-        ends.pack(fill="x", pady=(8, 0))
+        ends.pack(fill="x")
         if s["managed"]:
             app._button(ends, "삭제…", self.delete, danger=True).pack(side="left")
-        app._button(ends, "닫기", self.close).pack(side="right")
+        app._button(ends, "닫기", self.close, primary=True).pack(side="right")
         tk.Frame(win, height=1, bg=c["line"]).pack(side="bottom", fill="x")
 
         bar, self._restyle = app._tab_bar(win, ["정보", "SKILL.md"], self.show_page)
