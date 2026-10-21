@@ -1199,6 +1199,26 @@ class TrayMenuTest(unittest.TestCase):
             self.assertTrue(callable(getattr(v.App, cmd, None)), cmd)
 
 
+class StartupErrorTest(unittest.TestCase):
+    def test_a_missing_module_says_what_to_install_and_where(self):
+        text = v.startup_error_text(ModuleNotFoundError("No module named 'PIL.ImageTk'", name="PIL.ImageTk"))
+        self.assertIn("'PIL'", text)
+        self.assertIn("pip install -r", text)
+        self.assertIn("requirements.txt", text)
+        self.assertIn("일반 터미널", text)  # installing from inside the Claude app went to a folder only that app can see
+
+    def test_any_other_failure_is_shown_and_its_traceback_kept(self):
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(mgr, "STORE", Path(t) / "store"):
+            err = RuntimeError("boom")
+            with (
+                mock.patch.object(v.tk, "Tk"),
+                mock.patch.object(v.messagebox, "showerror") as show,
+            ):
+                v.report_startup_failure(err)
+            self.assertIn("boom", show.call_args[0][1])
+            self.assertIn("RuntimeError: boom", (Path(t) / "store" / "error.log").read_text(encoding="utf-8"))
+
+
 class CategoryTest(unittest.TestCase):
     def test_every_skill_is_in_exactly_one_category(self):
         listed = [s for c in v.CATALOG for s in c["skills"]]

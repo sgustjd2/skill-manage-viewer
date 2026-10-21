@@ -1833,6 +1833,30 @@ class DetailDialog:
             self.win.destroy()
 
 
+def startup_error_text(e: BaseException) -> str:
+    if isinstance(e, ModuleNotFoundError) and e.name:
+        return (
+            f"필요한 모듈 '{e.name.split('.')[0]}'을(를) 찾을 수 없어 시작하지 못했습니다.\n\n"
+            "Claude 앱 안이 아닌 일반 터미널(PowerShell)에서 아래를 실행한 뒤 다시 시작하세요. "
+            "앱 안의 터미널로 설치하면 그 앱만 볼 수 있는 폴더에 설치됩니다.\n\n"
+            f'python -m pip install -r "{HERE / "requirements.txt"}"'
+        )
+    return f"시작하지 못했습니다.\n\n{type(e).__name__}: {e}\n\n자세한 내용: {mgr.STORE / 'error.log'}"
+
+
+def report_startup_failure(e: BaseException) -> None:
+    """pythonw has no console, so a failed start would look like "nothing happened": say why, and keep the traceback."""
+    import traceback
+
+    with contextlib.suppress(OSError):
+        mgr.STORE.mkdir(parents=True, exist_ok=True)
+        (mgr.STORE / "error.log").write_text("".join(traceback.format_exception(e)), encoding="utf-8")
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showerror("SkillDesk를 시작하지 못했습니다", startup_error_text(e), parent=root)
+    root.destroy()
+
+
 if __name__ == "__main__":
     if "--tray-child" in sys.argv:
         tray_child()
@@ -1843,6 +1867,9 @@ if __name__ == "__main__":
     elif "--make-icns" in sys.argv:
         make_icns(HERE / "skill_viewer.icns")
     elif not plat.already_running():
-        App().run(hidden="--hidden" in sys.argv)
+        try:
+            App().run(hidden="--hidden" in sys.argv)
+        except Exception as e:  # noqa: BLE001 - whatever stopped the start: show it instead of dying silently
+            report_startup_failure(e)
     elif "--hidden" not in sys.argv:  # started by hand while a copy is already up (maybe in the tray): bring its window forward
         plat.ask_running_copy_to_show()
