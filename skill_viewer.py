@@ -1211,7 +1211,9 @@ class App:
     def _update_done(self, res, manual: bool = False) -> None:
         if isinstance(res, Exception):
             res = upd.Result("failed", str(res))
-        if res.status == "updated":
+        if res.status == "updated" and res.data_only:
+            pass  # only skill_recommend.json changed: the 추천 tab reads it each time it opens, so no restart is needed
+        elif res.status == "updated":
             self.pending_restart = res
             self._show_restart_pill()
             if self.visible:
@@ -1291,7 +1293,8 @@ class AddDialog:
     the bundled skills.sh snapshot: picking a row hands its repo to the link tab, which does the usual download → choose → install."""
     W, H = 540, 720
     # 추천 tab: sub-tab -> (key in the snapshot, what its install count counts)
-    RECOMMENDED = {"인기": ("popular", "누적 설치 수"), "요즘 뜨는": ("trending", "최근 24시간 설치 수")}
+    RECOMMENDED = {"인기": ("popular", "누적 설치 수"), "요즘 뜨는": ("trending", "최근 24시간 설치 수"),
+                   "어제 급등": ("surge", "늘어난 스타 수")}
 
     def __init__(self, app: App):
         self.app, c = app, app.c
@@ -1496,9 +1499,16 @@ class AddDialog:
         self.rec_tab = tab
         self._restyle_rec(tab)
         updated = self.recommended["updated"]
-        self.rec_caption.config(text=f"{counts} 순" + (f" · {updated} 기준" if updated else ""))
+        since = self.recommended["surge_since"] if key == "surge" else ""
+        self.rec_caption.config(text=f"{counts} 순" + (f" · {updated} 기준" if updated else "") + (f" · {since} 대비" if since else ""))
         self.rec_list.clear()
         self.rec_list.canvas.yview_moveto(0)
+        if key == "surge" and not self.recommended[key] and updated:
+            tip = ("급등한 스킬이 없습니다." if since
+                   else "아직 비교할 어제 기록이 없습니다.\n하루가 지나면 전날보다 스타가 늘어난 스킬이 여기에 나옵니다.")
+            app._label(self.rec_list.body, tip, 10, fg=c["muted"], anchor="w", justify="left", wraplength=app.px(self.W - 90),
+                       padx=14, pady=14).pack(fill="x")
+            return
         if not self.recommended[key]:
             app._label(self.rec_list.body, "추천 목록이 비어 있습니다.\nskill_recommend.json이 없거나 읽을 수 없습니다. "
                        "tools/update_recommend.py로 다시 만들 수 있습니다.", 10, fg=c["muted"], anchor="w", justify="left",
@@ -1514,7 +1524,7 @@ class AddDialog:
         row.pack(fill="x")
         top = tk.Frame(row, bg=c["surface"], cursor="hand2")
         top.pack(fill="x", padx=14, pady=(8, 0))
-        count = app._label(top, f"{e['installs']:,}회", 10, fg=c["muted"], cursor="hand2")
+        count = app._label(top, f"+{e['gain']:,}★" if "gain" in e else f"{e['installs']:,}회", 10, fg=c["muted"], cursor="hand2")
         count.pack(side="right")  # the right-hand items are packed first so a long name can't push them out
         badge = None
         if installed:
