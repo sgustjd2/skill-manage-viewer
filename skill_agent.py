@@ -95,11 +95,10 @@ class Draft:
     def preview(self) -> str:
         """SKILL.md and the file list, for the user to read before installing. Producing it is what unlocks install_draft()."""
         text = (self.dir / "SKILL.md").read_text(encoding="utf-8", errors="replace")
-        files = self.files()
-        shown = files[:PREVIEW_FILES] + ([f"… 외 {len(files) - PREVIEW_FILES}개"] if len(files) > PREVIEW_FILES else [])
-        cut = "\n… (이후 생략)" if len(text) > PREVIEW_CHARS else ""
+        files = self.files()  # generate() refused drafts whose SKILL.md or file list would not fit here, so nothing is cut
+        extra = "\n⚠ SKILL.md 외 파일은 이름만 보입니다. 스크립트가 있으면 설치 전에 폴더에서 직접 읽어 보세요." if len(files) > 1 else ""
         self.seen = True
-        return f"{text[:PREVIEW_CHARS]}{cut}\n\n──────────\n파일 {len(files)}개\n" + "\n".join(shown)
+        return f"{text}\n\n──────────\n파일 {len(files)}개\n" + "\n".join(files) + extra
 
     def discard(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)  # our own scratch folder, never anything of the user's
@@ -191,7 +190,10 @@ def generate(request: str, cli: list[str], job: Job | None = None, timeout: int 
             raise mgr.ManagerError(f"에이전트가 정한 폴더 이름을 쓸 수 없습니다: {d.name}\n이름은 영문·숫자·-_. 만 쓸 수 있습니다")
         if any(mgr.is_link(p) for p in d.rglob("*")):
             raise mgr.ManagerError("만들어진 폴더에 바로가기(링크)가 들어 있어 쓰지 않습니다")
-        return Draft(root, d, note)
+        draft = Draft(root, d, note)
+        if len((d / "SKILL.md").read_text(encoding="utf-8", errors="replace")) > PREVIEW_CHARS or len(draft.files()) > PREVIEW_FILES:
+            raise mgr.ManagerError("만들어진 스킬이 너무 커서 미리보기로 다 볼 수 없어 쓰지 않습니다. 요청을 줄여 다시 시도하세요")
+        return draft
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
         raise

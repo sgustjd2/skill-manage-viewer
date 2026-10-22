@@ -161,6 +161,13 @@ class AgentTest(unittest.TestCase):
         self.assertFalse(m.is_link(m.AGENT_DIRS["Claude Code"] / "my-skill"))
         self.assertFalse((m.STORE / "skills/my-skill").exists())
 
+    def test_a_draft_too_big_to_preview_in_full_is_refused(self):
+        with mock.patch.object(sa, "PREVIEW_FILES", 1), self.assertRaises(m.ManagerError) as cm:
+            sa.generate("MODE:ok", self.cli)  # SKILL.md plus references/a.md: one more file than the preview can list
+        self.assertIn("미리보기", str(cm.exception))
+        with mock.patch.object(sa, "PREVIEW_CHARS", 10), self.assertRaises(m.ManagerError):
+            sa.generate("MODE:ok", self.cli)
+
     def test_discard_removes_only_the_scratch_folder(self):
         d = self.make()
         d.discard()
