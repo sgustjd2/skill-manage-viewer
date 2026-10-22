@@ -22,6 +22,7 @@
 - 커밋 메시지: `Type: 한국어 요약`(Feat·Fix·Refactor·Chore·Docs·Test·Style, 명사로 끝, 마침표 없음). 본문은 필요할 때만 "왜"를 불릿 2~4개로.
 - PR 본문은 `.github/pull_request_template.md`의 세 항목만, 항목마다 3~6줄. 검증에는 실제로 실행한 명령과 결과를 한 줄씩.
 - 머지는 CI(Windows·macOS) 통과 후, squash 없이 머지 커밋으로.
+- 버전과 릴리스 노트는 main에 머지되면 자동입니다. 커밋 제목의 `Feat:`(마이너 올림), `Fix:`·`Refactor:`·`Style:`(패치 올림)이 정합니다. 큰 변경(메이저)은 `VERSION` 파일을 직접 고칩니다.
 
 ## 코드 지도
 
