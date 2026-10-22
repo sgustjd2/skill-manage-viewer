@@ -31,6 +31,7 @@
 | 스킬 추가 대화상자(링크 설치·새로 만들기) | `skill_viewer.py` – `AddDialog` |
 | 스킬 목록 읽기, 출처·카테고리·한국어 설명 | `skill_viewer.py` – `collect`, `describe_origin`, `categorize`, `brief` |
 | 링크 해석, git 받기, 설치·업데이트·삭제·생성 | `skill_manager.py` |
+| 프로젝트별 스킬 세트(저장·적용·해제·구조 트리), 그 창 | `skill_harness.py`, `skill_viewer.py` – `HarnessWindow` |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
 | 카테고리 정의, 스킬별 한국어 설명 | `skill_categories.json`, `skill_notes.json` |
 | 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `skill_recommend.json` |
