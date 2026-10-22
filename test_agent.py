@@ -192,6 +192,9 @@ class AgentTest(unittest.TestCase):
     def test_empty_request_never_starts_the_agent(self):
         with self.assertRaises(mgr.ManagerError):
             self.gen("ok", "   ")
+        with self.assertRaises(mgr.ManagerError) as cm:
+            self.gen("ok", "x" * (sa.MAX_REQUEST + 1))
+        self.assertIn("너무 깁니다", str(cm.exception))
         self.assertEqual(self.made, [])
 
 

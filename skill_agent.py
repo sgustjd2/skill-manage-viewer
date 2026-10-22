@@ -24,6 +24,7 @@ SUPPORTED = "Claude Code"
 UNSUPPORTED = ("Codex", "Antigravity")  # no checked way to run them non-interactively yet
 TIMEOUT = 600  # seconds; writing a skill takes a minute or two
 MAX_BYTES = 5_000_000  # a draft bigger than this is not a skill
+MAX_REQUEST = 2000  # characters: a pasted document is not a request, and the agent is billed by what it reads
 MAX_CHARS, MAX_FILES = 20_000, 60  # more than this is too much to read in the preview before installing
 EXTRA_NOTE = "SKILL.md 외 파일은 이름만 보입니다. 스크립트가 있으면 설치 전에 읽어 보세요."
 TOOLS = "Read,Write,Edit,Glob,Grep"
@@ -145,6 +146,8 @@ def generate(request: str, cancel: threading.Event, base_cmd: list[str] | None =
     request = " ".join(request.split())
     if not request:
         raise mgr.ManagerError("어떤 스킬이 필요한지 적어 주세요")
+    if len(request) > MAX_REQUEST:
+        raise mgr.ManagerError(f"요청이 너무 깁니다 ({len(request)}자, 최대 {MAX_REQUEST}자)")
     if base_cmd is None:
         exe = plat.find_claude()
         if not exe:
