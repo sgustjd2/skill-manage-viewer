@@ -367,23 +367,28 @@ _SOURCE = re.compile(r"[A-Za-z0-9-]+/[\w.-]+")  # owner/repo on GitHub
 
 
 def load_recommended() -> dict:
-    """The bundled snapshot -> {"updated": 'YYYY-MM-DD', "popular": [...], "trending": [...]}, each entry
-    {"source": 'owner/repo', "skill": name, "installs": n}. A missing or broken file, or an odd entry, counts as nothing."""
+    """The bundled snapshot -> {"updated": 'YYYY-MM-DD', "popular": [...], "trending": [...], "surge": [...], "surge_since": 'YYYY-MM-DD'},
+    each popular/trending entry {"source": 'owner/repo', "skill": name, "installs": n}, each surge entry the same with
+    "stars" and "gain" instead of "installs" (surge_since is '' when there was no earlier day to compare with).
+    A missing or broken file, or an odd entry, counts as nothing."""
     try:
         raw = json.loads(RECOMMENDED.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raw = None
     raw = raw if isinstance(raw, dict) else {}
 
-    def entries(key: str) -> list[dict]:
+    def entries(key: str, *counts: str) -> list[dict]:
         items = raw.get(key)
-        return [{"source": e["source"], "skill": e["skill"], "installs": e["installs"]}
+        return [{"source": e["source"], "skill": e["skill"], **{k: e[k] for k in counts}}
                 for e in (items if isinstance(items, list) else [])
                 if isinstance(e, dict) and isinstance(e.get("source"), str) and _SOURCE.fullmatch(e["source"])
                 and isinstance(e.get("skill"), str) and NAME_RE.fullmatch(e["skill"])
-                and isinstance(e.get("installs"), int) and not isinstance(e["installs"], bool)]
-    updated = raw.get("updated")
-    return {"updated": updated if isinstance(updated, str) else "", "popular": entries("popular"), "trending": entries("trending")}
+                and all(isinstance(e.get(k), int) and not isinstance(e[k], bool) for k in counts)]
+
+    def text(key: str) -> str:
+        return raw[key] if isinstance(raw.get(key), str) else ""
+    return {"updated": text("updated"), "surge_since": text("surge_since"), "popular": entries("popular", "installs"),
+            "trending": entries("trending", "installs"), "surge": entries("surge", "stars", "gain")}
 
 
 def detected_agents() -> list[str]:
