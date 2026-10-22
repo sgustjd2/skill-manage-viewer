@@ -495,7 +495,7 @@ class App:
         actions = self.actions = tk.Frame(header, bg=c["surface"])
         actions.pack(side="right", padx=(0, 8))
         # created before self.footer exists; the hint handlers only touch it when the pointer is over a button
-        for text, cmd, hint in (("＋ 추가", self.add_dialog, "스킬 추가 (링크로 설치 · 새로 만들기)"),
+        for text, cmd, hint in (("＋ 추가", self.add_dialog, "스킬 추가 (링크로 설치 · 새로 만들기 · 추천)"),
                                 ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬의 업데이트 확인"),
                                 ("⟳", self.load, "목록 새로고침"),
                                 ("⚙", self.settings_dialog, "설정 (표시할 에이전트)"),
@@ -1278,16 +1278,20 @@ class App:
 
 
 class AddDialog:
-    """Install skills from a link, or create a new one. Both tabs link into the agents you tick."""
+    """Install skills from a link, or create a new one. Both tabs link into the agents you tick. The 추천 tab only lists
+    the bundled skills.sh snapshot: picking a row hands its repo to the link tab, which does the usual download → choose → install."""
     W, H = 540, 720
+    # 추천 tab: sub-tab -> (key in the snapshot, what its install count counts)
+    RECOMMENDED = {"인기": ("popular", "누적 설치 수"), "요즘 뜨는": ("trending", "최근 24시간 설치 수")}
 
     def __init__(self, app: App):
         self.app, c = app, app.c
         self.win = win = app._side_window("스킬 추가", self.W, self.H)
         self.mode = "link"
+        self.rec_tab = "인기"
         self.picks: dict[Path, tk.BooleanVar] = {}
         self.agents = {a: tk.BooleanVar(value=True) for a in app.agents}
-        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기"], self.show)
+        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기", "추천"], self.show)
         bar.pack(fill="x")
         tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
         self.panel = tk.Frame(win, bg=c["bg"])
@@ -1315,7 +1319,7 @@ class AddDialog:
             w.destroy()
         self._restyle(tab)
         self.mode = tab
-        (self._build_link if tab == "링크로 설치" else self._build_new)()
+        {"링크로 설치": self._build_link, "새로 만들기": self._build_new, "추천": self._build_recommended}[tab]()
 
     # -- tab 1: install from link
     def _build_link(self) -> None:
@@ -1349,7 +1353,8 @@ class AddDialog:
         self.results = Scroll(p, c)
         self.results.wrap.pack(fill="both", expand=True, pady=(4, 0))
 
-    def load_link(self) -> None:
+    def load_link(self, prefer: str | None = None) -> None:
+        """prefer: the skill to tick when the repo holds several (a pick from the 추천 tab)."""
         text = self.link.get()
         self.say("불러오는 중… (처음 받는 저장소는 몇 초 걸립니다)")
         self.app._enable(self.install_btn, False)
@@ -1357,20 +1362,25 @@ class AddDialog:
         def work():
             _, root = mgr.fetch(text)
             return mgr.discover(root)
-        self.app.bg(work, self._loaded)
+        self.app.bg(work, lambda res: self._loaded(res, prefer))
 
-    def _loaded(self, res) -> None:
-        if not self.win.winfo_exists():
+    def _loaded(self, res, prefer: str | None = None) -> None:
+        if not self.win.winfo_exists() or self.mode != "링크로 설치":  # the user moved to another tab while it downloaded
             return
         if isinstance(res, Exception):
             self.say(f"불러오지 못했습니다: {res}", warn=True)
             return
-        self._show_found(res)
+        self._show_found(res, prefer)
 
-    def _show_found(self, found: list[Path]) -> None:
+    def _show_found(self, found: list[Path], prefer: str | None = None) -> None:
+        """The skill named `prefer` goes first and is the only one ticked; without it, a lone skill is ticked. Named by its folder,
+        or by the `name:` in its SKILL.md (skills.sh lists the latter: 'vercel-react-best-practices' is the folder react-best-practices)."""
         app, c = self.app, self.app.c
         self.results.clear()
-        self.picks = {d: tk.BooleanVar(value=len(found) == 1) for d in found}
+        want = next((d for d in found if prefer in (d.name, mgr.parse(d / "SKILL.md")["name"])), None) if prefer else None
+        if want:
+            found = [want, *(d for d in found if d != want)]
+        self.picks = {d: tk.BooleanVar(value=d == want if want else len(found) == 1) for d in found}
         if not found:
             self.say("SKILL.md가 들어 있는 폴더를 찾지 못했습니다", warn=True)
             return
@@ -1452,6 +1462,76 @@ class AddDialog:
         self.say(f"만들었습니다: {d}\n편집기에서 SKILL.md 본문을 채워 주세요.")
         self.app.load()
         mgr.open_in_editor(d / "SKILL.md")
+
+    # -- tab 3: recommended
+    def _build_recommended(self) -> None:
+        app, c, p = self.app, self.app.c, self.panel
+        self.recommended = mgr.load_recommended()
+        btns = tk.Frame(p, bg=c["bg"])
+        btns.pack(side="bottom", fill="x", pady=(10, 0))
+        app._button(btns, "닫기", self.close).pack(side="right")
+        app._label(p, "⚠ 설치 수는 품질·안전을 보증하지 않습니다. 고르면 그 저장소를 받아 스킬 목록만 보여 주고, "
+                      "설치는 내용을 확인한 뒤 '선택한 스킬 설치'를 눌러야 시작됩니다.", 10, fg=c["warn_fg"], bg=c["bg"], anchor="w",
+                   justify="left", wraplength=app.px(self.W - 50)).pack(side="bottom", fill="x", pady=(8, 0))
+        bar, self._restyle_rec = app._tab_bar(p, list(self.RECOMMENDED), self.show_recommended)
+        bar.pack(fill="x")
+        self.rec_caption = app._label(p, "", 10, fg=c["muted"], bg=c["bg"], anchor="w")
+        self.rec_caption.pack(fill="x", pady=(8, 4))
+        self.rec_list = Scroll(p, c)
+        self.rec_list.wrap.pack(fill="both", expand=True)
+        self.show_recommended(self.rec_tab)
+
+    def show_recommended(self, tab: str) -> None:
+        app, c = self.app, self.app.c
+        key, counts = self.RECOMMENDED[tab]
+        self.rec_tab = tab
+        self._restyle_rec(tab)
+        updated = self.recommended["updated"]
+        self.rec_caption.config(text=f"{counts} 순" + (f" · {updated} 기준" if updated else ""))
+        self.rec_list.clear()
+        self.rec_list.canvas.yview_moveto(0)
+        if not self.recommended[key]:
+            app._label(self.rec_list.body, "추천 목록이 비어 있습니다.\nskill_recommend.json이 없거나 읽을 수 없습니다. "
+                       "tools/update_recommend.py로 다시 만들 수 있습니다.", 10, fg=c["muted"], anchor="w", justify="left",
+                       wraplength=app.px(self.W - 90), padx=14, pady=14).pack(fill="x")
+            return
+        installed = {s["name"] for skills in app.data.values() for s in skills}
+        for e in self.recommended[key]:
+            self._rec_row(e, e["skill"] in installed)
+
+    def _rec_row(self, e: dict, installed: bool) -> None:
+        app, c, body = self.app, self.app.c, self.rec_list.body
+        row = tk.Frame(body, bg=c["surface"], cursor="hand2")
+        row.pack(fill="x")
+        top = tk.Frame(row, bg=c["surface"], cursor="hand2")
+        top.pack(fill="x", padx=14, pady=(8, 0))
+        count = app._label(top, f"{e['installs']:,}회", 10, fg=c["muted"], cursor="hand2")
+        count.pack(side="right")  # the right-hand items are packed first so a long name can't push them out
+        badge = None
+        if installed:
+            badge = app._label(top, "설치됨", 9, bold=True, fg=c["on_accent"], bg=c["accent"], padx=6, cursor="hand2")
+            badge.pack(side="right", padx=(0, 10))
+        room = app.px(self.W - 60 - 130) - app.px(64) * installed
+        name = app._label(top, app._fit(e["skill"], room), 11, bold=True, anchor="w", cursor="hand2")
+        name.pack(side="left")
+        source = app._label(row, e["source"], 10, fg=c["muted"], anchor="w", cursor="hand2")
+        source.pack(fill="x", padx=14, pady=(1, 8))
+        tk.Frame(body, height=1, bg=c["line"]).pack(fill="x")
+        tinted = (row, top, count, name, source)  # the badge keeps its own colors
+
+        def tint(color):
+            for w in tinted:
+                w.config(bg=color)
+        for w in (*tinted, *([badge] if badge else [])):
+            w.bind("<Enter>", lambda ev: tint(c["soft"]))
+            w.bind("<Leave>", lambda ev: tint(c["surface"]))
+            w.bind("<Button-1>", lambda ev, e=e: self.use_recommended(e))
+
+    def use_recommended(self, e: dict) -> None:
+        """Hand the pick to the link tab, which downloads the repo and lists what is in it (nothing is installed yet)."""
+        self.show("링크로 설치")
+        self.link.set(e["source"])
+        self.load_link(prefer=e["skill"])
 
 
 class SettingsDialog:

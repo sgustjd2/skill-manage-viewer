@@ -362,6 +362,30 @@ def save_setting(key: str, value: object) -> None:
     (STORE / "settings.json").write_text(json.dumps({**load_settings(), key: value}, indent=1), encoding="utf-8")
 
 
+RECOMMENDED = Path(__file__).parent / "skill_recommend.json"  # a snapshot of skills.sh, rebuilt by tools/update_recommend.py
+_SOURCE = re.compile(r"[A-Za-z0-9-]+/[\w.-]+")  # owner/repo on GitHub
+
+
+def load_recommended() -> dict:
+    """The bundled snapshot -> {"updated": 'YYYY-MM-DD', "popular": [...], "trending": [...]}, each entry
+    {"source": 'owner/repo', "skill": name, "installs": n}. A missing or broken file, or an odd entry, counts as nothing."""
+    try:
+        raw = json.loads(RECOMMENDED.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = None
+    raw = raw if isinstance(raw, dict) else {}
+
+    def entries(key: str) -> list[dict]:
+        items = raw.get(key)
+        return [{"source": e["source"], "skill": e["skill"], "installs": e["installs"]}
+                for e in (items if isinstance(items, list) else [])
+                if isinstance(e, dict) and isinstance(e.get("source"), str) and _SOURCE.fullmatch(e["source"])
+                and isinstance(e.get("skill"), str) and NAME_RE.fullmatch(e["skill"])
+                and isinstance(e.get("installs"), int) and not isinstance(e["installs"], bool)]
+    updated = raw.get("updated")
+    return {"updated": updated if isinstance(updated, str) else "", "popular": entries("popular"), "trending": entries("trending")}
+
+
 def detected_agents() -> list[str]:
     """Agents whose config folder exists on this PC (the skills folder inside it may not yet)."""
     return [a for a, d in AGENT_DIRS.items() if d.parent.is_dir()]

@@ -915,6 +915,109 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(mgr.parse(mgr.AGENT_DIRS["Codex"] / "pa/SKILL.md")["desc"], "pa skill")
         dlg.close()
 
+    def recommend_file(self, **lists) -> Path:
+        path = self.tmp / "skill_recommend.json"
+        path.write_text(json.dumps({"updated": "2026-10-21", "popular": [], "trending": [], **lists}), encoding="utf-8")
+        return path
+
+    def test_07b_recommend_tab_lists_the_snapshot_with_installed_marks(self):
+        app = self.app
+        path = self.recommend_file(
+            popular=[{"source": "o/pack", "skill": "newbie", "installs": 1234567}, {"source": "o/other", "skill": "tdd", "installs": 999}],
+            trending=[{"source": "o/new", "skill": "fresh", "installs": 4321}],
+        )
+        with mock.patch.object(mgr, "RECOMMENDED", path):
+            app.add_dialog()
+            dlg = app.dialog
+            self.assertEqual(dlg.mode, "링크로 설치")  # the tab is a third one: the dialog still opens on the link tab
+            dlg.show("추천")
+            app.root.update()
+            shown = texts(dlg.win)
+            for want in ("추천", "인기", "요즘 뜨는", "newbie", "o/pack", "1,234,567회", "tdd", "o/other", "999회",
+                         "누적 설치 수 순 · 2026-10-21 기준"):
+                self.assertIn(want, shown)
+            self.assertNotIn("fresh", shown)
+            self.assertTrue(any("설치 수는 품질·안전을 보증하지 않습니다" in t for t in shown))
+            self.assertEqual(shown.count("설치됨"), 1)  # tdd is in the Claude Code folder; newbie is not
+            badge = next(w for w in walk(dlg.win) if isinstance(w, tk.Label) and w.cget("text") == "설치됨")
+            self.assertEqual(badge.master.winfo_children()[-1].cget("text"), "tdd")  # the badge sits on tdd's own row
+            dlg.show_recommended("요즘 뜨는")
+            shown = texts(dlg.win)
+            self.assertIn("fresh", shown)
+            self.assertIn("최근 24시간 설치 수 순 · 2026-10-21 기준", shown)
+            self.assertNotIn("newbie", shown)
+            self.assertNotIn("설치됨", shown)
+            dlg.show("새로 만들기")
+            dlg.show("추천")  # the sub-tab you were on is kept
+            self.assertEqual(dlg.rec_tab, "요즘 뜨는")
+            self.assertIn("fresh", texts(dlg.win))
+            self.shot(dlg.win, "t7b_dialog_recommended")
+            dlg.close()
+
+    def test_07c_picking_a_recommendation_opens_the_link_tab_and_ticks_that_skill(self):
+        app = self.app
+        pack = self.tmp / "rec-pack"
+        for n in ("ra", "rb", "rc"):
+            write_skill(pack / n)
+        path = self.recommend_file(popular=[{"source": "o/rec-pack", "skill": "rb", "installs": 5000}])
+        with mock.patch.object(mgr, "RECOMMENDED", path), mock.patch.object(mgr, "fetch", return_value=(pack, pack)) as fetch:
+            app.add_dialog()
+            dlg = app.dialog
+            dlg.show("추천")
+            app.root.update()
+            row = next(w for w in walk(dlg.win) if isinstance(w, tk.Label) and w.cget("text") == "rb")
+            row.event_generate("<Button-1>")
+            self.settle(lambda: dlg.picks)
+            fetch.assert_called_once_with("o/rec-pack")  # no network: fetch is the one thing that would reach out
+            self.assertEqual(dlg.mode, "링크로 설치")
+            self.assertEqual(dlg.link.get(), "o/rec-pack")
+            self.assertEqual({d.name: v.get() for d, v in dlg.picks.items()}, {"ra": False, "rb": True, "rc": False})
+            self.assertEqual(next(iter(dlg.picks)).name, "rb")  # listed first, so it is on screen however long the repo's list is
+            self.assertEqual(str(dlg.install_btn.cget("state")), "normal")
+            self.assertIn("3개", dlg.status.cget("text"))
+            self.assertFalse((mgr.AGENT_DIRS["Claude Code"] / "rb").exists())  # picking only lists; installing is the button's job
+            dlg.close()
+
+    def test_07d_a_pick_that_is_not_in_the_repo_ticks_nothing_and_no_pick_is_unchanged(self):
+        app = self.app
+        pack = self.tmp / "rec-pack2"
+        for n in ("sa", "sb"):
+            write_skill(pack / n)
+        app.add_dialog()
+        dlg = app.dialog
+        dlg._show_found(mgr.discover(pack), "nope")
+        self.assertEqual([v.get() for v in dlg.picks.values()], [False, False])
+        dlg._show_found(mgr.discover(pack), None)
+        self.assertEqual([v.get() for v in dlg.picks.values()], [False, False])
+        renamed = self.tmp / "rec-pack3"  # skills.sh names a skill by its SKILL.md name, which may differ from the folder's
+        write_skill(renamed / "other")
+        write_skill(renamed / "react-best-practices")
+        skill_md = renamed / "react-best-practices/SKILL.md"
+        skill_md.write_text("---\nname: vercel-react-best-practices\ndescription: d\n---\n", encoding="utf-8")
+        dlg._show_found(mgr.discover(renamed), "vercel-react-best-practices")
+        self.assertEqual({d.name: v.get() for d, v in dlg.picks.items()}, {"react-best-practices": True, "other": False})
+        dlg._show_found(mgr.discover(pack / "sa"), "nope")  # one skill in the repo: ticked as before
+        self.assertEqual([v.get() for v in dlg.picks.values()], [True])
+        dlg._show_found([], "x")
+        self.assertIn("찾지 못했습니다", dlg.status.cget("text"))
+        dlg.show("추천")
+        dlg._loaded(mgr.discover(pack))  # a download finishing after the user left the link tab changes nothing and raises nothing
+        dlg.close()
+
+    def test_07e_without_a_usable_snapshot_the_tab_says_so(self):
+        app = self.app
+        broken = self.tmp / "broken-recommend.json"
+        broken.write_text("{not json", encoding="utf-8")
+        for path in (self.tmp / "no-such-file.json", broken, self.recommend_file()):
+            with self.subTest(path.name), mock.patch.object(mgr, "RECOMMENDED", path):
+                app.add_dialog()
+                dlg = app.dialog
+                dlg.show("추천")
+                for tab in ("인기", "요즘 뜨는"):
+                    dlg.show_recommended(tab)
+                    self.assertTrue(any("추천 목록이 비어 있습니다" in t for t in texts(dlg.win)))
+                dlg.close()
+
     # ---- update / delete --------------------------------------------------------------------
     def test_08_check_and_apply_updates(self):
         app = self.app
@@ -1051,6 +1154,15 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, dlg.win, app.theme + " dialog, install enabled")
             dlg.show("새로 만들기")
             bad += low_contrast(app, dlg.win, app.theme + " dialog, new")
+            both = [{"source": "o/pack", "skill": "tdd", "installs": 12345}, {"source": "o/b", "skill": "newbie", "installs": 9}]
+            with mock.patch.object(mgr, "RECOMMENDED", self.recommend_file(popular=both)):
+                dlg.show("추천")
+            bad += low_contrast(app, dlg.win, app.theme + " dialog, recommended")
+            for w in walk(dlg.win):  # the row under the pointer (tinted), and the installed badge on it
+                if isinstance(w, tk.Label) and w.cget("text") in ("tdd", "newbie"):
+                    w.event_generate("<Enter>")
+                    bad += low_contrast(app, dlg.win, app.theme + " dialog, recommended hover")
+                    w.event_generate("<Leave>")
             dlg.close()
             app.toggle_theme()
         self.maxDiff = None

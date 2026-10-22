@@ -194,7 +194,15 @@ def main() -> None:
             dlg.name.set("release-notes")
             dlg.desc.set("Write release notes from merged pull requests")
             shot(dlg.win, "add-new")
+            dlg.show("추천")  # the bundled skills.sh snapshot; the demo skills above that it lists show as installed
+            shot(dlg.win, "add-recommended")
             dlg.close()
+            app.toggle_theme()
+            app.add_dialog()
+            app.dialog.show("추천")
+            shot(app.dialog.win, "add-recommended-dark")
+            app.dialog.close()
+            app.toggle_theme()
 
             grilling = next(x for x in app.data["Claude Code"] if x["name"] == "grilling")
             app.detail(grilling)

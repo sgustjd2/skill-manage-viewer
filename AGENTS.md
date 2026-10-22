@@ -33,6 +33,7 @@
 | 링크 해석, git 받기, 설치·업데이트·삭제·생성 | `skill_manager.py` |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
 | 카테고리 정의, 스킬별 한국어 설명 | `skill_categories.json`, `skill_notes.json` |
+| 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `skill_recommend.json` |
 | 시작 메뉴 / macOS 앱 등록 | `install.py` |
 | 테스트 | `test_manager.py`(로직), `test_viewer.py`(`PanelTest`만 창을 띄움), `test_install.py`, `test_check.py` |
 

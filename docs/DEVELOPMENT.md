@@ -104,6 +104,8 @@ skill-manage-viewer/
 ├─ skill_update.py          앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기
 ├─ skill_categories.json    카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
 ├─ skill_notes.json         스킬별 한국어 한 줄 용도 (이름 → 설명)
+├─ skill_recommend.json     추천 탭에 보여 줄 skills.sh 인기·요즘 뜨는 목록의 스냅샷 (tools/update_recommend.py가 만듦)
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 (앱은 쓰지 않음)
 ├─ skill_viewer.ico         앱 아이콘 (Windows)
 ├─ fonts/                   Pretendard Regular·Bold + 라이선스
 ├─ start.bat / start.command  더블클릭 실행 (Windows / macOS)
@@ -111,6 +113,7 @@ skill-manage-viewer/
 ├─ test_manager.py          skill_manager 테스트
 ├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
 ├─ test_install.py          install.py 테스트
+├─ test_recommend.py        추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
 │  ├─ make_screenshots.py   README 스크린샷 다시 찍기
@@ -191,6 +194,7 @@ python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나�
 | `test_viewer.py` – `CategoryTest` | 한 스킬이 두 카테고리에 들어가지 않는지, 설명 있는 스킬의 카테고리 누락, 색·기준 문장 짝 |
 | `test_viewer.py` – `DiscoveryTest` | 다른 PC 상황: 링크로 설치된 스킬, 순환 링크, 이상한 `SKILL.md`, 없는 에이전트 폴더, 깨진 플러그인 파일, 환경변수 |
 | `test_install.py` | macOS `.app` 구성과 제거 범위(모든 OS), Windows 바로 가기 내용(Windows만) |
+| `test_recommend.py` | 추천 스냅샷: 실제 페이지 모양의 작은 예시로 파싱, GitHub 아닌 출처·저장소별 상한·같은 이름·설치 수 하한 거르기, 형식이 바뀌면 실패, 실패하면 기존 파일 유지, 요청이 두 공개 페이지뿐인지, `load_recommended()`가 없거나 깨진 파일을 빈 목록으로 보는지 (네트워크 없음) |
 | `test_usage.py` | 호출 횟수 집계: 도구 호출과 `/이름`, 달별 합계, 이어받은 대화의 중복, 캐시 재사용, 깨진 입력, 플러그인 접두어, 정리 후보(최근 2개월 기준·해가 바뀔 때·기록이 없을 때), 기록이 시작된 시점 |
 | `test_update.py` | 앱 자동 업데이트: 공식 저장소·`main`·수정 없음일 때만 동작하는지, fast-forward만 하는지, 의존성 설치 조건, **실패하면 정확히 이전 커밋으로 되돌리는지**(임시 저장소 사용) |
 
@@ -228,6 +232,15 @@ python -m pyright skill_manager.py skill_viewer.py platform_support.py install.p
 3. `python -m unittest test_viewer.CategoryTest`로 중복·누락을 확인합니다.
 
 플러그인 스킬은 `superpowers:brainstorming`처럼 앞에 플러그인 이름이 붙어도 뒤의 이름(`brainstorming`)으로 찾습니다.
+
+### 추천 목록을 새로 받을 때
+
+`python tools/update_recommend.py` (표준 라이브러리만 씁니다). skills.sh의 `/`와 `/trending`을 **한 번씩만** 받아 `skill_recommend.json`을 새로 씁니다. 앱은 이 파일만 읽고 네트워크를 쓰지 않습니다.
+
+- 목록은 페이지에 실린 `initialSkills` JSON에서 읽습니다(화면 마크업이 아님). `/api/`·`/search`는 `robots.txt`가 막으므로 부르지 않습니다.
+- 거르는 기준은 스크립트 위쪽 상수입니다: GitHub `owner/repo`만, 저장소당 `PER_REPO`개, 같은 스킬 이름은 한 번, 설치 `MIN_INSTALLS` 이상, 목록당 `SIZE`개.
+- 받지 못했거나 페이지 형식이 바뀌어 `initialSkills`를 못 찾으면 **기존 파일을 그대로 두고** 종료 코드 1로 끝납니다. 이 경우 `parse_skills()`를 새 형식에 맞게 고치고 `test_recommend.py`의 예시를 갱신하세요.
+- 새 파일은 `git diff`로 눈으로 훑고 커밋합니다(설치 수는 품질·안전 보증이 아니라서, 이상한 저장소가 상위에 보이면 걸러내는 기준을 손봅니다).
 
 ### 카테고리를 새로 만들거나 바꿀 때
 
