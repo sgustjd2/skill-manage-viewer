@@ -194,6 +194,21 @@ def main() -> None:
             dlg.name.set("release-notes")
             dlg.desc.set("Write release notes from merged pull requests")
             shot(dlg.win, "add-new")
+            made = t / "agent-scratch" / "work" / "pdf-summary"  # what the agent would have left in its scratch folder
+            made.mkdir(parents=True)
+            (made / "SKILL.md").write_text(
+                "---\nname: pdf-summary\ndescription: PDF 문서를 읽고 핵심만 요약한다. 사용자가 PDF 요약을 요청할 때 사용한다.\n---\n\n"
+                "# PDF 요약\n\n1. PDF를 끝까지 읽는다.\n2. 결론, 근거, 남은 질문을 3~5줄로 정리한다.\n", encoding="utf-8")
+            with mock.patch.object(v.sa, "availability", return_value=(Path("claude"), "Claude Code를 찾았습니다.")):
+                dlg.draft = v.sa.Draft(made.parents[1], made, "")
+                dlg.show("에이전트로 만들기")
+            dlg.request.config(state="normal")
+            dlg.request.insert("1.0", "PDF 문서를 받으면 핵심을 3~5줄로 요약해 주는 스킬")
+            dlg.request.config(state="disabled")
+            dlg.win.lift()
+            dlg.win.focus_force()
+            shot(dlg.win, "add-agent")
+            dlg.draft = None
             dlg.show("추천")  # the bundled skills.sh snapshot; the demo skills above that it lists show as installed
             shot(dlg.win, "add-recommended")
             dlg.close()

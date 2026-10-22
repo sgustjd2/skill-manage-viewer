@@ -98,6 +98,7 @@ python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들
 skill-manage-viewer/
 ├─ skill_viewer.py          화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴
 ├─ skill_manager.py         일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
+├─ skill_agent.py           에이전트(Claude Code)로 스킬 초안 만들기: `claude` 찾기, 임시 폴더에서 실행, 미리보기, 확인 뒤 설치 (Tk 없음)
 ├─ skill_usage.py           Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 ├─ platform_support.py      OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 ├─ install.py               시작 메뉴 바로 가기 / macOS .app 만들기·지우기
@@ -113,6 +114,7 @@ skill-manage-viewer/
 ├─ test_manager.py          skill_manager 테스트
 ├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
 ├─ test_install.py          install.py 테스트
+├─ test_agent.py            skill_agent 테스트 (가짜 `claude` 스크립트 사용)
 ├─ test_recommend.py        추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
@@ -152,6 +154,14 @@ skill-manage-viewer/
 - 링크 → `parse_link()`(https만, 경로 검사) → `fetch()`가 `~/.skill-manager/sources/`에 얕은 clone(`protocol.allow=never`) → `discover()`로 스킬 폴더 찾기 → `install()`이 각 에이전트 폴더에 **링크**를 만듭니다.
 - 복사하지 않으므로 업데이트는 원본 clone에서 `git pull --ff-only` 한 번이면 됩니다(`update()`). 폴더가 옮겨졌으면 `relink()`가 다시 연결합니다.
 - 삭제(`remove()`)는 링크면 끊고, 실제 폴더면 `trash/`로 옮깁니다. **영구 삭제 코드는 없습니다.**
+
+**에이전트로 스킬 만들기** (`skill_agent`, 화면은 `AddDialog`의 4번째 탭)
+
+- `find_cli()`가 `shutil.which("claude")`, 없으면 알려진 설치 위치(`~/.local/bin`, Windows npm 등)를 확인합니다. 못 찾으면 안내 문구만 보이고 실행 버튼이 없습니다.
+- `generate()`는 임시 폴더(`skilldesk-agent-*/work`)에서 `claude -p --restricted --permission-mode dontAsk --permission-prompts none --no-session-persistence --output-format json --max-budget-usd 2 --tools Read,Write,Edit,Glob,Grep --allowedTools …`를 돌리고, 요청문은 표준 입력으로 보냅니다. 이 인자는 `claude --help`(2.1.302)와 실제 실행으로 확인한 것입니다. `--restricted`가 파일 도구를 작업 폴더 안으로 가두고 Bash·PowerShell·WebFetch와 사용자 설정을 끕니다(허용 목록만으로는 폴더 밖 쓰기가 막히지 않는 것을 확인했습니다). 대신 사용자의 `skill-creator`는 쓸 수 없어 `PROMPT`에 핵심 지침을 넣었습니다.
+- 결과는 `Draft`입니다. 스킬 폴더가 정확히 하나이고, 이름이 `NAME_RE`에 맞고, 링크가 없을 때만 받습니다. `Draft.preview()`를 만들어야 `install_draft()`가 허용되고, 설치는 `STORE/skills/<이름>`으로 옮긴 뒤 기존 `install()`을 부릅니다. 임시 폴더는 설치·버리기·실패·취소 때 지웁니다.
+- 시간 제한(`TIMEOUT`)과 `Job.cancel()`은 프로세스 트리를 끝냅니다(Windows는 `taskkill /T`). 옛 Claude Code가 `--restricted`를 모르면 오류가 나고 업데이트하라고 안내합니다(안전하지 않게 실행되지 않습니다).
+- Codex·Antigravity: 비대화형 실행 방식과 skill-creator 유무를 확인하지 못해 `NOT_YET`으로 두었습니다. 추가하려면 `--help`로 확인한 인자만 쓰세요.
 
 **화면과 작업 스레드**
 
@@ -194,6 +204,7 @@ python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나�
 | `test_viewer.py` – `CategoryTest` | 한 스킬이 두 카테고리에 들어가지 않는지, 설명 있는 스킬의 카테고리 누락, 색·기준 문장 짝 |
 | `test_viewer.py` – `DiscoveryTest` | 다른 PC 상황: 링크로 설치된 스킬, 순환 링크, 이상한 `SKILL.md`, 없는 에이전트 폴더, 깨진 플러그인 파일, 환경변수 |
 | `test_install.py` | macOS `.app` 구성과 제거 범위(모든 OS), Windows 바로 가기 내용(Windows만) |
+| `test_agent.py` | 에이전트로 만들기: `claude`를 찾음/못 찾음, 실행 인자(제한 옵션·도구 목록)와 작업 폴더가 임시 폴더인지, 요청문 외에 로컬 정보를 보내지 않는지, 미리보기 전 설치 거부, 설치 때 폴더 이동, 이름 충돌 시 초안 보존, 시간 초과·취소·실패·여러 폴더·잘못된 이름·링크 거부, 임시 폴더 정리 (가짜 실행 파일 사용, 실제 에이전트는 실행하지 않음) |
 | `test_recommend.py` | 추천 스냅샷: 실제 페이지 모양의 작은 예시로 파싱, GitHub 아닌 출처·저장소별 상한·같은 이름·설치 수 하한 거르기, 형식이 바뀌면 실패, 실패하면 기존 파일 유지, 요청이 두 공개 페이지뿐인지, `load_recommended()`가 없거나 깨진 파일을 빈 목록으로 보는지 (네트워크 없음) |
 | `test_usage.py` | 호출 횟수 집계: 도구 호출과 `/이름`, 달별 합계, 이어받은 대화의 중복, 캐시 재사용, 깨진 입력, 플러그인 접두어, 정리 후보(최근 2개월 기준·해가 바뀔 때·기록이 없을 때), 기록이 시작된 시점 |
 | `test_update.py` | 앱 자동 업데이트: 공식 저장소·`main`·수정 없음일 때만 동작하는지, fast-forward만 하는지, 의존성 설치 조건, **실패하면 정확히 이전 커밋으로 되돌리는지**(임시 저장소 사용) |

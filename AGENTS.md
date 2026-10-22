@@ -31,11 +31,12 @@
 | 스킬 추가 대화상자(링크 설치·새로 만들기) | `skill_viewer.py` – `AddDialog` |
 | 스킬 목록 읽기, 출처·카테고리·한국어 설명 | `skill_viewer.py` – `collect`, `describe_origin`, `categorize`, `brief` |
 | 링크 해석, git 받기, 설치·업데이트·삭제·생성 | `skill_manager.py` |
+| 에이전트(Claude Code)로 스킬 초안 만들기: `claude` 찾기, 임시 폴더 실행, 미리보기, 설치 | `skill_agent.py` (화면은 `AddDialog._build_agent`) |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
 | 카테고리 정의, 스킬별 한국어 설명 | `skill_categories.json`, `skill_notes.json` |
 | 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `skill_recommend.json` |
 | 시작 메뉴 / macOS 앱 등록 | `install.py` |
-| 테스트 | `test_manager.py`(로직), `test_viewer.py`(`PanelTest`만 창을 띄움), `test_install.py`, `test_check.py` |
+| 테스트 | `test_manager.py`(로직), `test_viewer.py`(`PanelTest`만 창을 띄움), `test_install.py`, `test_check.py`, `test_agent.py`(에이전트 만들기) |
 
 ## 지켜야 할 것
 
