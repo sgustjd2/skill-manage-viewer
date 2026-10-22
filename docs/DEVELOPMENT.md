@@ -98,23 +98,25 @@ python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들
 skill-manage-viewer/
 ├─ skill_viewer.py          화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴
 ├─ skill_manager.py         일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
-├─ skill_agent.py           에이전트(Claude Code)로 스킬 초안 만들기: `claude` 찾기, 임시 폴더에서 실행, 미리보기, 확인 뒤 설치 (Tk 없음)
+├─ skill_agent.py           에이전트(Claude Code)에게 스킬을 만들게 함: 임시 폴더에서 실행·시간 제한·취소, 결과 검사(Draft), 미리보기 뒤 설치 (Tk 없음)
+├─ skill_harness.py         프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
 ├─ skill_usage.py           Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 ├─ platform_support.py      OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 ├─ install.py               시작 메뉴 바로 가기 / macOS .app 만들기·지우기
 ├─ skill_update.py          앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기
 ├─ skill_categories.json    카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
 ├─ skill_notes.json         스킬별 한국어 한 줄 용도 (이름 → 설명)
-├─ skill_recommend.json     추천 탭에 보여 줄 skills.sh 인기·요즘 뜨는 목록의 스냅샷 (tools/update_recommend.py가 만듦)
-├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 (앱은 쓰지 않음)
+├─ skill_recommend.json     추천 탭에 보여 줄 skills.sh 인기·요즘 뜨는 목록, 어제 급등 목록, 날짜별 스타 수의 스냅샷 (tools/update_recommend.py가 만듦)
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 (앱은 쓰지 않음; 매일 .github/workflows/recommend.yml이 돌림)
 ├─ skill_viewer.ico         앱 아이콘 (Windows)
 ├─ fonts/                   Pretendard Regular·Bold + 라이선스
 ├─ start.bat / start.command  더블클릭 실행 (Windows / macOS)
 ├─ requirements.txt         실행에 필요한 패키지
 ├─ test_manager.py          skill_manager 테스트
+├─ test_agent.py            skill_agent 테스트: 가짜 에이전트로 감지·미리보기 뒤 설치·임시 폴더·실패·시간 초과·취소
 ├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
+├─ test_harness.py          skill_harness 테스트 (임시 폴더)
 ├─ test_install.py          install.py 테스트
-├─ test_agent.py            skill_agent 테스트 (가짜 `claude` 스크립트 사용)
 ├─ test_recommend.py        추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
@@ -154,14 +156,6 @@ skill-manage-viewer/
 - 링크 → `parse_link()`(https만, 경로 검사) → `fetch()`가 `~/.skill-manager/sources/`에 얕은 clone(`protocol.allow=never`) → `discover()`로 스킬 폴더 찾기 → `install()`이 각 에이전트 폴더에 **링크**를 만듭니다.
 - 복사하지 않으므로 업데이트는 원본 clone에서 `git pull --ff-only` 한 번이면 됩니다(`update()`). 폴더가 옮겨졌으면 `relink()`가 다시 연결합니다.
 - 삭제(`remove()`)는 링크면 끊고, 실제 폴더면 `trash/`로 옮깁니다. **영구 삭제 코드는 없습니다.**
-
-**에이전트로 스킬 만들기** (`skill_agent`, 화면은 `AddDialog`의 4번째 탭)
-
-- `find_cli()`가 `shutil.which("claude")`, 없으면 알려진 설치 위치(`~/.local/bin`, Windows npm 등)를 확인합니다. 못 찾으면 안내 문구만 보이고 실행 버튼이 없습니다.
-- `generate()`는 임시 폴더(`skilldesk-agent-*/work`)에서 `claude -p --restricted --permission-mode dontAsk --permission-prompts none --no-session-persistence --output-format json --max-budget-usd 2 --tools Read,Write,Edit,Glob,Grep --allowedTools …`를 돌리고, 요청문은 표준 입력으로 보냅니다. 이 인자는 `claude --help`(2.1.302)와 실제 실행으로 확인한 것입니다. `--restricted`가 파일 도구를 작업 폴더 안으로 가두고 Bash·PowerShell·WebFetch와 사용자 설정을 끕니다(허용 목록만으로는 폴더 밖 쓰기가 막히지 않는 것을 확인했습니다). 대신 사용자의 `skill-creator`는 쓸 수 없어 `PROMPT`에 핵심 지침을 넣었습니다.
-- 결과는 `Draft`입니다. 스킬 폴더가 정확히 하나이고, 이름이 `NAME_RE`에 맞고, 링크가 없을 때만 받습니다. `Draft.preview()`를 만들어야 `install_draft()`가 허용되고, 설치는 `STORE/skills/<이름>`으로 옮긴 뒤 기존 `install()`을 부릅니다. 임시 폴더는 설치·버리기·실패·취소 때 지웁니다.
-- 시간 제한(`TIMEOUT`)과 `Job.cancel()`은 프로세스 트리를 끝냅니다(Windows는 `taskkill /T`). 옛 Claude Code가 `--restricted`를 모르면 오류가 나고 업데이트하라고 안내합니다(안전하지 않게 실행되지 않습니다).
-- Codex·Antigravity: 비대화형 실행 방식과 skill-creator 유무를 확인하지 못해 `NOT_YET`으로 두었습니다. 추가하려면 `--help`로 확인한 인자만 쓰세요.
 
 **화면과 작업 스레드**
 
@@ -203,9 +197,9 @@ python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나�
 | `test_viewer.py` – `PlatformTest` | 폴더 링크 만들기·지우기, 중복 실행 방지, 다시 실행할 때 남기는 "창을 보여 달라" 쪽지(한 번만 읽힘·오래된 쪽지 무시), 우클릭 이벤트, 트레이 명령 허용 목록 |
 | `test_viewer.py` – `CategoryTest` | 한 스킬이 두 카테고리에 들어가지 않는지, 설명 있는 스킬의 카테고리 누락, 색·기준 문장 짝 |
 | `test_viewer.py` – `DiscoveryTest` | 다른 PC 상황: 링크로 설치된 스킬, 순환 링크, 이상한 `SKILL.md`, 없는 에이전트 폴더, 깨진 플러그인 파일, 환경변수 |
+| `test_harness.py` | 세트·프로젝트 저장과 불러오기(이상한 파일 무시, 알 수 없는 키 보존), 적용 시 링크 생성, 해제 시 **이 앱이 만든 링크만** 제거, 같은 이름의 실제 폴더·사용자가 바꾼 링크는 그대로, 없는 프로젝트 폴더·경로 검증, `.git/info/exclude` 추가와 되돌리기(기본 꺼짐), 구조 트리가 아무것도 만들지 않는지 |
 | `test_install.py` | macOS `.app` 구성과 제거 범위(모든 OS), Windows 바로 가기 내용(Windows만) |
-| `test_agent.py` | 에이전트로 만들기: `claude`를 찾음/못 찾음, 실행 인자(제한 옵션·도구 목록)와 작업 폴더가 임시 폴더인지, 요청문 외에 로컬 정보를 보내지 않는지, 미리보기 전 설치 거부, 설치 때 폴더 이동, 이름 충돌 시 초안 보존, 시간 초과·취소·실패·여러 폴더·잘못된 이름·링크 거부, 임시 폴더 정리 (가짜 실행 파일 사용, 실제 에이전트는 실행하지 않음) |
-| `test_recommend.py` | 추천 스냅샷: 실제 페이지 모양의 작은 예시로 파싱, GitHub 아닌 출처·저장소별 상한·같은 이름·설치 수 하한 거르기, 형식이 바뀌면 실패, 실패하면 기존 파일 유지, 요청이 두 공개 페이지뿐인지, `load_recommended()`가 없거나 깨진 파일을 빈 목록으로 보는지 (네트워크 없음) |
+| `test_recommend.py` | 추천 스냅샷: 급등 계산(첫날 빈 목록·증가량 순·하한·같은 날 다시 돌리기·기록 보관 일수), GitHub 실패 시 기존 파일 유지, 실제 페이지 모양의 작은 예시로 파싱, GitHub 아닌 출처·저장소별 상한·같은 이름·설치 수 하한 거르기, 형식이 바뀌면 실패, 실패하면 기존 파일 유지, 요청이 두 공개 페이지뿐인지, `load_recommended()`가 없거나 깨진 파일을 빈 목록으로 보는지 (네트워크 없음) |
 | `test_usage.py` | 호출 횟수 집계: 도구 호출과 `/이름`, 달별 합계, 이어받은 대화의 중복, 캐시 재사용, 깨진 입력, 플러그인 접두어, 정리 후보(최근 2개월 기준·해가 바뀔 때·기록이 없을 때), 기록이 시작된 시점 |
 | `test_update.py` | 앱 자동 업데이트: 공식 저장소·`main`·수정 없음일 때만 동작하는지, fast-forward만 하는지, 의존성 설치 조건, **실패하면 정확히 이전 커밋으로 되돌리는지**(임시 저장소 사용) |
 
@@ -251,6 +245,9 @@ python -m pyright skill_manager.py skill_viewer.py platform_support.py install.p
 - 목록은 페이지에 실린 `initialSkills` JSON에서 읽습니다(화면 마크업이 아님). `/api/`·`/search`는 `robots.txt`가 막으므로 부르지 않습니다.
 - 거르는 기준은 스크립트 위쪽 상수입니다: GitHub `owner/repo`만, 저장소당 `PER_REPO`개, 같은 스킬 이름은 한 번, 설치 `MIN_INSTALLS` 이상, 목록당 `SIZE`개.
 - 받지 못했거나 페이지 형식이 바뀌어 `initialSkills`를 못 찾으면 **기존 파일을 그대로 두고** 종료 코드 1로 끝납니다. 이 경우 `parse_skills()`를 새 형식에 맞게 고치고 `test_recommend.py`의 예시를 갱신하세요.
+- **어제 급등**: 위 두 목록에 나온 저장소(최대 약 60개)의 GitHub 스타 수를 `https://api.github.com/repos/<owner>/<repo>`로 한 번씩 받아 `stars`에 날짜별로 쌓고(`KEEP_DAYS`일치만 보관), 가장 가까운 이전 날짜와의 차이를 `surge`에 씁니다(`MIN_GAIN` 이상, `SURGE_SIZE`개까지, `surge_since`는 비교한 날짜). 첫 실행은 비교 대상이 없어 `surge`가 비어 있고 앱이 "내일부터 표시"라고 안내합니다. 날짜는 한국 시간입니다.
+- `GITHUB_TOKEN` 환경변수가 있으면 API 호출에 쓰고(`GITHUB_TOKEN=$(gh auth token) python tools/update_recommend.py`), 없으면 비로그인(시간당 60회)으로 부릅니다. 저장소가 사라졌으면(404) 그 저장소만 빼고, 한도 초과·네트워크 오류면 기존 파일을 그대로 두고 종료 코드 1로 끝납니다.
+- **매일 자동 갱신**: `.github/workflows/recommend.yml`이 한국 시간 오전 7시(UTC 22:00)에 스크립트를 돌려, 바뀌면 `skill_recommend.json`만 `main`에 커밋합니다(공식 저장소에서만, `contents: write` 권한만, 수동 실행도 가능). 앱은 자동 업데이트로 받는데, 바뀐 파일이 `skill_recommend.json`뿐이면(`skill_update.DATA_FILES`) 재시작 안내 없이 적용하고 추천 탭은 열 때마다 파일을 다시 읽습니다.
 - 새 파일은 `git diff`로 눈으로 훑고 커밋합니다(설치 수는 품질·안전 보증이 아니라서, 이상한 저장소가 상위에 보이면 걸러내는 기준을 손봅니다).
 
 ### 카테고리를 새로 만들거나 바꿀 때
@@ -280,6 +277,12 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 2. 두 OS에서 같아야 하는 동작은 `test_viewer.PlatformTest`에 테스트를 추가합니다. 한 OS에서만 의미 있는 검사는 `if plat.WIN:` 또는 `@unittest.skipUnless`로 감쌉니다.
 3. PR을 올리면 CI에서 두 OS 결과를 확인합니다.
 
+### 에이전트로 스킬 만들기를 고칠 때
+
+- 실행 인자(`skill_agent.FLAGS`)는 `claude --help`에서 확인한 것만 씁니다(확인한 버전 2.1.302). `--restricted`가 셸·웹 도구를 빼고 파일 도구를 작업 폴더에 가두며, `--permission-prompts none`이 묻는 동작을 거부로 바꿉니다. 인자를 바꾸면 임시 폴더 밖 쓰기가 거부되는지 직접 확인하세요.
+- 에이전트 명령 찾기는 `platform_support.find_claude()`(PATH → 설치 프로그램이 두는 폴더)입니다. Codex·Antigravity는 비대화형 실행 방식을 확인하기 전에는 더하지 않습니다.
+- 테스트는 실제 에이전트를 실행하지 않습니다. `test_agent.py`의 가짜 실행 파일이나 `generate`를 목으로 바꿔 쓰세요.
+
 ### 새 링크 형식을 받게 할 때
 
 `skill_manager.parse_link()`를 고치고 `test_manager.ParseLink`에 허용·거부 예를 함께 추가합니다. **https 이외의 형식은 받지 않는다**는 원칙은 유지하세요(`file:`, `ext::` 같은 git 프로토콜은 명령 실행으로 이어질 수 있습니다).
@@ -308,6 +311,8 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 
 ## 알려진 한계
 
+- **프로젝트 하네스의 범위**: 세트에는 스킬 이름만 담습니다. `harness.json`의 세트는 키가 있는 딕셔너리(`{"skills": [...]}`)이고 `version` 필드가 있어서 `CLAUDE.md`·훅·MCP 설정을 더하려면 키를 늘리면 되지만, 무엇을 담을지는 아직 정해지지 않았습니다(구조 가이드는 있는지만 보여 줍니다).
+- **프로젝트 폴더의 Windows 링크**: Claude Code 문서는 프로젝트 `.claude/skills`의 심볼릭 링크만 명시하고 junction은 언급하지 않습니다. 사용자 폴더(`~/.claude/skills`)에서 이 앱이 쓰던 junction과 같은 방식이라 같은 동작을 기대하지만, 프로젝트 폴더에서 실제 Claude Code로 확인한 적은 없습니다.
 - **macOS 창 위치**: Tk가 메뉴 막대·Dock 크기를 알려 주지 않아 위 25px, 아래 90px을 비운 근사값으로 놓습니다.
 - **브랜치 이름에 `/`가 있는 링크**: `tree/feature/x/...`는 브랜치를 `feature`로 읽습니다. 저장소 루트 링크를 쓰세요.
 - **삭제한 스킬의 clone**: `~/.skill-manager/sources/`에 남겨 둡니다(다시 설치할 때 빠르도록). 필요하면 직접 지워도 됩니다.

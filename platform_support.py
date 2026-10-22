@@ -46,12 +46,17 @@ def unlink_dir(p: Path) -> None:
         p.unlink() if p.is_symlink() else os.rmdir(p)
 
 
-# ---- finding programs ----------------------------------------------------------------------------
-def find_executable(name: str, known: list[Path]) -> Path | None:
-    """`name` on PATH, else the first of the `known` install locations that holds a file. The app is often started from the
-    Start menu / Spotlight, whose PATH lacks the folders a terminal gets from the user's shell profile."""
-    found = shutil.which(name)
-    return Path(found) if found else next((p for p in known if p.is_file()), None)
+# ---- finding agent CLIs --------------------------------------------------------------------------
+def find_claude() -> Path | None:
+    """The Claude Code command, or None. The PATH first, then the places its installers put it (often not on the PATH)."""
+    if found := shutil.which("claude"):
+        return Path(found)
+    home = Path.home()
+    names = ("claude.exe", "claude.cmd") if WIN else ("claude",)
+    folders = [home / ".local/bin", home / ".claude/local"]
+    folders += [Path(os.environ["APPDATA"]) / "npm"] if WIN and os.environ.get("APPDATA") else \
+        [Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+    return next((f / n for f in folders for n in names if (f / n).is_file()), None)
 
 
 # ---- opening things ------------------------------------------------------------------------------

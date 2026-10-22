@@ -1,0 +1,29 @@
+name: Recommend
+
+on:
+  schedule:
+    - cron: "0 22 * * *"  # 07:00 Korea time
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.repository == 'sgustjd2/skill-manage-viewer'  # forks don't run it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/update_recommend.py  # on failure the old file stays and the job fails
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Commit the new list
+        run: |
+          git diff --quiet skill_recommend.json && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Chore: 추천 목록 갱신 ($(TZ=Asia/Seoul date +%F))" skill_recommend.json
+          git push

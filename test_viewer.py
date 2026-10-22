@@ -24,6 +24,8 @@ from PIL import ImageGrab
 
 import install
 import platform_support as plat
+import skill_agent
+import skill_harness as hn
 import skill_manager as mgr
 import skill_update as upd
 import skill_viewer as v
@@ -633,6 +635,19 @@ class PanelTest(unittest.TestCase):
             app.restart_pill.destroy()
             app.restart_pill = None
 
+    def test_03h2_a_data_only_update_does_not_ask_for_a_restart(self):
+        app = self.app
+        done = upd.Result("updated", "", "aaa1111", "bbb2222", ["Chore: 추천 목록 갱신"], data_only=True)
+        with mock.patch.object(upd, "restart") as restart, mock.patch.object(app, "quit") as quit_:
+            app._update_done(done)
+            app.hide()
+            app._update_done(done)  # even with the window hidden
+            app.show()
+        restart.assert_not_called()
+        quit_.assert_not_called()
+        self.assertFalse(app.pending_restart)
+        self.assertNotIn("새 버전 · 다시 시작", texts(app.actions))
+
     def test_03i_update_messages_and_the_on_off_switch(self):
         app = self.app
         with mock.patch.object(upd, "apply", return_value=upd.Result("up-to-date", "", "a", "a")) as apply:
@@ -883,65 +898,53 @@ class PanelTest(unittest.TestCase):
         self.shot(dlg.win, "t6_dialog_new")
         dlg.close()
 
-    def agent_draft(self, name="agent-made") -> v.sa.Draft:
-        root = Path(tempfile.mkdtemp(prefix="skilldesk-agent-test-", dir=self.tmp))
-        write_skill(root / "work" / name, "에이전트가 쓴 설명")
-        return v.sa.Draft(root, root / "work" / name, "끝")
-
-    def test_06b_add_dialog_agent_tab_asks_first_then_previews_then_installs(self):
+    def test_06b_add_dialog_agent(self):
+        """The agent tab asks first, shows the result, and links nothing until 설치 is pressed."""
         app = self.app
         app.add_dialog()
         dlg = app.dialog
-        with mock.patch.object(v.sa, "availability", return_value=(None, "claude 명령을 이 PC에서 찾지 못했습니다")):
+        dlg.show("에이전트로 만들기")
+        folder = self.tmp / "agent-draft/note-taker"
+        write_skill(folder, "회의록을 정리할 때 쓴다")
+        draft = skill_agent.Draft(folder.parent, folder, "note-taker", (folder / "SKILL.md").read_text(encoding="utf-8"), ["SKILL.md"])
+        dlg.request.set("회의록 정리 스킬")
+        with (mock.patch.object(skill_agent.plat, "find_claude", return_value=Path("claude")),
+              mock.patch.object(skill_agent, "generate", return_value=draft) as gen):
             dlg.show("에이전트로 만들기")
-        self.assertIsNone(dlg.agent_cli)  # no program: a notice, and no way to start
-        self.assertEqual(dlg.a_make.winfo_manager(), "")
-        self.assertTrue(any("찾지 못했습니다" in str(w.cget("text")) for w in walk(dlg.panel) if isinstance(w, tk.Label)))
-        fake = self.tmp / "fake-claude"
-        with mock.patch.object(v.sa, "availability", return_value=(fake, "Claude Code를 찾았습니다.")):
-            dlg.show("에이전트로 만들기")
-        dlg.request.insert("1.0", "PDF를 요약하는 스킬")
-        with mock.patch.object(v.messagebox, "askyesno", return_value=False), mock.patch.object(v.sa, "generate") as gen:
-            dlg.ask_agent()  # the user says no to the question: the agent is not started
-        gen.assert_not_called()
-        self.assertIsNone(dlg.job)
-        outcomes = ((v.sa.Cancelled("취소했습니다"), "취소했습니다"), (mgr.ManagerError("시간 초과"), "만들지 못했습니다: 시간 초과"))
-        for err, text in outcomes:
-            with mock.patch.object(v.messagebox, "askyesno", return_value=True), mock.patch.object(v.sa, "generate", side_effect=err):
-                dlg.ask_agent()
-                self.settle(lambda: dlg.job is None)
-            self.assertEqual(dlg.status.cget("text"), text)
-            self.assertIsNone(dlg.draft)
-        draft = self.agent_draft()
-        with mock.patch.object(v.messagebox, "askyesno", return_value=True) as ask, mock.patch.object(
-                v.sa, "generate", return_value=draft) as gen:
-            dlg.ask_agent()
+            dlg.request.set("회의록 정리 스킬")
+            with mock.patch.object(v.messagebox, "askokcancel", return_value=False) as ask:
+                dlg.agent_start()  # declined: the agent is never started
+            ask.assert_called_once()
+            gen.assert_not_called()
+            with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+                dlg.agent_start()
             self.settle(lambda: dlg.draft is not None)
-        self.assertIn("보내는 내용", ask.call_args.args[1])
-        self.assertEqual(gen.call_args.args[:2], ("PDF를 요약하는 스킬", [str(fake)]))  # the request text and nothing else
-        self.assertIn("name: agent-made", dlg.preview.get("1.0", "end"))  # shown, and nothing is installed yet
-        self.assertFalse((mgr.AGENT_DIRS["Claude Code"] / "agent-made").exists())
-        self.assertNotEqual(dlg.a_install.winfo_manager(), "")
+        self.assertIn("note-taker", dlg.files.cget("text"))
+        self.assertIn("note-taker", dlg.preview.get("1.0", "end"))
+        self.assertFalse(mgr.is_link(mgr.AGENT_DIRS["Claude Code"] / "note-taker"))  # previewed, not installed
         self.shot(dlg.win, "t6b_dialog_agent")
-        for a, var in dlg.agents.items():
-            var.set(a == "Claude Code")
-        dlg.install_draft()
-        self.assertTrue((mgr.AGENT_DIRS["Claude Code"] / "agent-made/SKILL.md").is_file())
-        self.assertIsNone(dlg.draft)
-        self.assertFalse(draft.root.exists())
+        dlg.agents["Codex"].set(False)
+        dlg.agents["Antigravity"].set(False)
+        dlg.agent_install()
+        self.settle(lambda: dlg.draft is None)
+        self.assertTrue(mgr.is_link(mgr.AGENT_DIRS["Claude Code"] / "note-taker"))
+        self.assertFalse(folder.exists())  # the temp folder is gone
         dlg.close()
-        mgr.remove("Claude Code", "agent-made")
-        app.load()
 
-    def test_06c_closing_the_dialog_stops_the_agent_and_throws_the_draft_away(self):
+    def test_06c_add_dialog_agent_missing_command(self):
         app = self.app
         app.add_dialog()
         dlg = app.dialog
-        draft = self.agent_draft("agent-dropped")
-        dlg.draft, dlg.job = draft, mock.Mock()
+        with mock.patch.object(skill_agent.plat, "find_claude", return_value=None):
+            dlg.show("에이전트로 만들기")
+            dlg.request.set("무언가")
+            with mock.patch.object(v.messagebox, "askokcancel") as ask:
+                dlg.agent_start()  # the button is disabled but Return in the entry still calls this
+            ask.assert_not_called()
+            self.assertIn("새로 만들기", dlg.status.cget("text"))
+            self.assertFalse(dlg.running)
+            self.assertEqual(str(dlg.make_btn.cget("state")), "disabled")
         dlg.close()
-        dlg.job.cancel.assert_called_once()
-        self.assertFalse(draft.root.exists())
 
     def test_07_add_dialog_link(self):
         app = self.app
@@ -1013,6 +1016,28 @@ class PanelTest(unittest.TestCase):
             self.assertIn("fresh", texts(dlg.win))
             self.shot(dlg.win, "t7b_dialog_recommended")
             dlg.close()
+
+    def test_07b2_surge_tab_shows_the_gain_and_explains_an_empty_list(self):
+        app = self.app
+        gains = [{"source": "o/pack", "skill": "newbie", "stars": 12000, "gain": 1234},
+                 {"source": "o/other", "skill": "tdd", "stars": 900, "gain": 12}]
+        cases = {"gains": {"surge": gains, "surge_since": "2026-10-20"}, "first day": {}, "quiet day": {"surge_since": "2026-10-20"}}
+        for name, extra in cases.items():
+            with self.subTest(name), mock.patch.object(mgr, "RECOMMENDED", self.recommend_file(**extra)):
+                app.add_dialog()
+                dlg = app.dialog
+                dlg.show("추천")
+                dlg.show_recommended("어제 급등")
+                shown = texts(dlg.win)
+                if name == "gains":
+                    for want in ("+1,234★", "newbie", "o/pack", "+12★", "tdd", "늘어난 스타 수 순 · 2026-10-21 기준 · 2026-10-20 대비"):
+                        self.assertIn(want, shown)
+                    self.shot(dlg.win, "t7b2_dialog_surge")
+                else:
+                    want = "아직 비교할 어제 기록이 없습니다" if name == "first day" else "급등한 스킬이 없습니다"
+                    self.assertTrue(any(want in t for t in shown))
+                    self.assertFalse(any("비어 있습니다" in t for t in shown))
+                dlg.close()
 
     def test_07c_picking_a_recommendation_opens_the_link_tab_and_ticks_that_skill(self):
         app = self.app
@@ -1158,7 +1183,7 @@ class PanelTest(unittest.TestCase):
         app.root.update()
         check(app.popup.win)
         app.close_popup()
-        for page in ("링크로 설치", "새로 만들기"):
+        for page in ("링크로 설치", "새로 만들기", "에이전트로 만들기"):
             dlg.show(page)
             for win in (app.root, dlg.win, app.detail_win.win):
                 check(win)
@@ -1182,6 +1207,7 @@ class PanelTest(unittest.TestCase):
         pack = self.tmp / "contrast-pack"
         for n in ("ca", "cb"):
             write_skill(pack / n)
+        proj = hn.add_project(self.tmp)  # any existing folder will do for drawing the harness window
         bad = []
         for _ in range(2):  # light, then dark
             app.set_agent("Claude Code")
@@ -1214,15 +1240,6 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, dlg.win, app.theme + " dialog, install enabled")
             dlg.show("새로 만들기")
             bad += low_contrast(app, dlg.win, app.theme + " dialog, new")
-            with mock.patch.object(v.sa, "availability", return_value=(None, "claude 명령을 찾지 못했습니다")):
-                dlg.show("에이전트로 만들기")
-            bad += low_contrast(app, dlg.win, app.theme + " dialog, agent, no program")
-            with mock.patch.object(v.sa, "availability", return_value=(pack, "Claude Code를 찾았습니다.")):
-                dlg.draft = self.agent_draft("ca")
-                dlg.show("에이전트로 만들기")
-            bad += low_contrast(app, dlg.win, app.theme + " dialog, agent, draft")
-            dlg.draft.discard()
-            dlg.draft = None
             both = [{"source": "o/pack", "skill": "tdd", "installs": 12345}, {"source": "o/b", "skill": "newbie", "installs": 9}]
             with mock.patch.object(mgr, "RECOMMENDED", self.recommend_file(popular=both)):
                 dlg.show("추천")
@@ -1233,9 +1250,92 @@ class PanelTest(unittest.TestCase):
                     bad += low_contrast(app, dlg.win, app.theme + " dialog, recommended hover")
                     w.event_generate("<Leave>")
             dlg.close()
+            app.harness_dialog()
+            hw = app.dialog
+            hw.select_project(proj)
+            hw.choose_set(None)
+            hw.name_var.set("x")
+            bad += low_contrast(app, hw.win, app.theme + " harness, new set")
+            hw.show_page("구조 가이드")
+            bad += low_contrast(app, hw.win, app.theme + " harness, guide")
+            hw.show_page("세트 편집")
+            for w in walk(hw.win):
+                if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
+                    w.event_generate("<Enter>")
+                    bad += low_contrast(app, hw.win, app.theme + " harness hover")
+                    w.event_generate("<Leave>")
+            hw.close()
             app.toggle_theme()
         self.maxDiff = None
         self.assertEqual(bad, [])
+
+    def test_15_harness_window_sets_a_project_up_and_takes_it_down_again(self):
+        app, claude = self.app, self.tmp / "claude"
+        write_skill(claude / "harness-demo")
+        proj = self.tmp / "harness-proj"
+        proj.mkdir()
+        subprocess.run(["git", "init", "-q", str(proj)], check=True, capture_output=True)
+        exclude = proj / ".git/info/exclude"
+        app.set_agent("Claude Code")
+        app.load()
+        app.harness_dialog()
+        app.root.update()
+        w = app.dialog
+        self.assertIsInstance(w, v.HarnessWindow)
+        with mock.patch.object(v.filedialog, "askdirectory", return_value=str(proj)):
+            w.add_project()
+        self.assertIn("harness-demo", w.skill_vars)
+        self.assertEqual(w.project, str(proj.resolve()))
+        w.choose_set(None)  # a new set, named and ticked here
+        w.name_var.set("web")
+        w.skill_vars["harness-demo"].set(True)
+        link = proj / ".claude/skills/harness-demo"
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=False) as ask:
+            w.apply()  # declined: nothing linked
+        self.assertIn("git status", ask.call_args[0][1])  # a git project is warned before anything is linked
+        self.assertFalse(link.exists())
+        self.assertEqual(hn.load()["sets"]["web"]["skills"], ["harness-demo"])  # the set itself was saved
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.apply()
+        self.assertTrue(mgr.is_link(link))
+        self.assertIn("새로 연결 1개", w.status.cget("text"))
+        self.assertNotIn("harness-demo", exclude.read_text(encoding="utf-8") if exclude.is_file() else "")  # opt-in only
+        w.show_page("구조 가이드")  # read-only tree of the project: our link marked, the user's own file only "있음"
+        (proj / "CLAUDE.md").write_text("x", encoding="utf-8")
+        w.draw_guide()
+        tree = next(x for x in walk(w.guide_page) if isinstance(x, tk.Text)).get("1.0", "end")
+        self.assertIn("harness-demo", tree)
+        self.assertRegex(tree, r"CLAUDE\.md\s+있음")
+        self.assertRegex(tree, r"AGENTS\.md\s+없음")
+        self.assertEqual(w.guide_page.winfo_manager(), "pack")
+        self.assertEqual(w.sets_page.winfo_manager(), "")
+        w.show_page("세트 편집")
+        self.assertEqual(w.sets_page.winfo_manager(), "pack")
+        w.release()
+        self.assertFalse(link.exists())
+        self.assertIn("연결 해제 1개", w.status.cget("text"))
+        w.exclude_var.set(True)
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True) as ask:
+            w.apply()
+        self.assertNotIn("git status", ask.call_args[0][1])
+        self.assertIn("/.claude/skills/harness-demo", exclude.read_text(encoding="utf-8"))
+        write_skill(proj / ".claude/skills/mine")  # the user's own skill beside ours survives removing the project
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.remove_project()
+            self.assertNotIn(str(proj.resolve()), hn.load()["projects"])
+            w.delete_set()  # nothing chosen: says so, asks nothing
+        self.assertFalse(mgr.is_link(link))
+        self.assertTrue((proj / ".claude/skills/mine/SKILL.md").is_file())
+        self.assertNotIn("harness-demo", exclude.read_text(encoding="utf-8"))
+        with mock.patch.object(v.filedialog, "askdirectory", return_value=str(proj)):
+            w.add_project()
+        w.choose_set("web")
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.delete_set()
+        self.assertNotIn("web", hn.load()["sets"])
+        w.close()
+        mgr.remove("Claude Code", "harness-demo")
+        app.load()
 
 
 def rgb(app, color):

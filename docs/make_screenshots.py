@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import platform_support as plat  # noqa: E402
+import skill_agent  # noqa: E402
+import skill_harness as hn  # noqa: E402
 import skill_manager as mgr  # noqa: E402
 import skill_viewer as v  # noqa: E402
 
@@ -194,21 +196,18 @@ def main() -> None:
             dlg.name.set("release-notes")
             dlg.desc.set("Write release notes from merged pull requests")
             shot(dlg.win, "add-new")
-            made = t / "agent-scratch" / "work" / "pdf-summary"  # what the agent would have left in its scratch folder
-            made.mkdir(parents=True)
-            (made / "SKILL.md").write_text(
-                "---\nname: pdf-summary\ndescription: PDF 문서를 읽고 핵심만 요약한다. 사용자가 PDF 요약을 요청할 때 사용한다.\n---\n\n"
-                "# PDF 요약\n\n1. PDF를 끝까지 읽는다.\n2. 결론, 근거, 남은 질문을 3~5줄로 정리한다.\n", encoding="utf-8")
-            with mock.patch.object(v.sa, "availability", return_value=(Path("claude"), "Claude Code를 찾았습니다.")):
-                dlg.draft = v.sa.Draft(made.parents[1], made, "")
-                dlg.show("에이전트로 만들기")
-            dlg.request.config(state="normal")
-            dlg.request.insert("1.0", "PDF 문서를 받으면 핵심을 3~5줄로 요약해 주는 스킬")
-            dlg.request.config(state="disabled")
-            dlg.win.lift()
-            dlg.win.focus_force()
+            plat.find_claude = lambda: Path("claude")  # as if the command is installed, whatever this PC has
+            dlg.show("에이전트로 만들기")
+            dlg.request.set("회의록을 결정 사항과 할 일로 정리하는 스킬")
+            folder = t / "agent-draft/meeting-minutes"
+            write_skill(folder, "회의록을 결정 사항과 할 일 목록으로 정리할 때 사용합니다.")
+            with (folder / "SKILL.md").open("a", encoding="utf-8") as f:
+                f.write("\n# 회의록 정리\n\n1. 회의록 전체를 읽습니다.\n2. 결정 사항과 할 일을 나눠 적습니다.\n")
+            md = (folder / "SKILL.md").read_text(encoding="utf-8")
+            dlg.draft = skill_agent.Draft(folder.parent, folder, folder.name, md, ["SKILL.md"])
+            dlg._agent_state()
             shot(dlg.win, "add-agent")
-            dlg.draft = None
+            dlg.draft = None  # the temp folder belongs to the demo world, not to close() to delete
             dlg.show("추천")  # the bundled skills.sh snapshot; the demo skills above that it lists show as installed
             shot(dlg.win, "add-recommended")
             dlg.close()
@@ -243,7 +242,26 @@ def main() -> None:
             shot(app.dialog.win, "settings")
             app.dialog.close()
 
+            work = t / "work"  # three made-up project folders; the first one is a git repo with its set applied
+            for n in ("web-shop", "api-server", "mobile-app"):
+                (work / n).mkdir(parents=True)
+                hn.add_project(work / n)
+            git(t, "init", "-q", str(work / "web-shop"))
+            hn.save_set("웹 개발", ["tdd", "frontend-design", "web-design-guidelines"])
+            hn.save_set("문서 작업", ["pdf", "docx", "xlsx"])
+            web = str((work / "web-shop").resolve())
+            hn.configure_project(web, "웹 개발", ["Claude Code"])
+            hn.apply(web, git_exclude=True)
             app.set_agent("Claude Code")
+            app.harness_dialog()
+            app.dialog.select_project(web)
+            shot(app.dialog.win, "harness")
+            (t / "work/web-shop/CLAUDE.md").write_text("# web-shop\n", encoding="utf-8")
+            app.dialog.show_page("구조 가이드")
+            shot(app.dialog.win, "harness-guide")
+            hn.release(web)  # unlink before the temp folder is removed
+            app.dialog.close()
+
             app.pick(v.USAGE)
             end = time.time() + 15
             while app.usage is None and time.time() < end:  # the counting runs on a worker thread

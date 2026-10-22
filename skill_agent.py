@@ -1,19 +1,12 @@
-"""Has an agent CLI write a skill for the user, then hands the result over for review. No Tk here (see AGENTS.md).
+"""Let a coding agent write a skill for the user. Pure logic (no Tk), so it can be tested with a fake agent.
 
-Only Claude Code is supported. The command line below was checked against `claude --help` (2.1.302) and a real run:
-  -p                          one answer, no interactive session; the prompt arrives on stdin (no quoting problems on Windows .cmd shims)
-  --restricted                no Bash/PowerShell/WebFetch, user/project settings ignored, file tools confined to the working folder
-                              (a plain allow-list is not enough: `--allowedTools Write` alone let a write escape to a sibling folder)
-  --tools / --allowedTools    only Read, Write, Edit, Glob, Grep
-  --permission-mode dontAsk + --permission-prompts none    anything not allowed is denied, nobody is asked
-  --no-session-persistence    leave no transcript behind        --max-budget-usd    cap on what one run may cost
-  --output-format json        one JSON object with `result` and `is_error`
-Because the user's settings are ignored, their own skill-creator skill is not available: the prompt carries its essentials.
+Only Claude Code is supported: it is the one whose non-interactive mode (`claude -p`) was checked. Codex and Antigravity are
+left out until their equivalents are checked the same way.
 
-The agent works in a scratch folder. What it wrote is a Draft: nothing is in the skills folders until install_draft(), which
-refuses a draft whose preview() was never produced.
+The agent only ever works inside a throw-away folder under the system temp folder. What it wrote is shown to the user
+as a Draft, and only `install_draft` (called when the user presses 설치) copies it into the skill store and links it.
+Nothing here touches the user's skills folders before that.
 """
-
 import json
 import os
 import shutil
@@ -27,190 +20,165 @@ from pathlib import Path
 import platform_support as plat
 import skill_manager as mgr
 
-AGENT = "Claude Code"  # the only agent that can create skills this way
-NOT_YET = ("Codex", "Antigravity")  # their non-interactive mode and skill-creator are not verified yet
-TIMEOUT = 600  # seconds
-MAX_REQUEST = 2000  # characters
+SUPPORTED = "Claude Code"
+UNSUPPORTED = ("Codex", "Antigravity")  # no checked way to run them non-interactively yet
+TIMEOUT = 600  # seconds; writing a skill takes a minute or two
+MAX_BYTES = 5_000_000  # a draft bigger than this is not a skill
+MAX_REQUEST = 2000  # characters: a pasted document is not a request, and the agent is billed by what it reads
+MAX_CHARS, MAX_FILES = 20_000, 60  # more than this is too much to read in the preview before installing
+EXTRA_NOTE = "SKILL.md 외 파일은 이름만 보입니다. 스크립트가 있으면 설치 전에 읽어 보세요."
 TOOLS = "Read,Write,Edit,Glob,Grep"
-BUDGET_USD = "2"
-PREVIEW_CHARS = 20000
-PREVIEW_FILES = 60
+BUDGET_USD = "2"  # most one run may cost
+# Flags below are all from `claude --help`: --restricted drops the shell/web tools, ignores the user's settings files and keeps
+# file tools inside the working folder (--allowedTools alone does NOT: a bare `Write` allow let a write escape, checked by running it);
+# --tools lists the only tools left; --permission-mode dontAsk with --permission-prompts none denies anything not allowed, so a stray
+# write outside the folder fails instead of waiting for a click; --output-format json gives `is_error` and `result`.
+FLAGS = ["-p", "--restricted", "--tools", TOOLS, "--allowedTools", TOOLS, "--permission-mode", "dontAsk",
+         "--permission-prompts", "none", "--no-session-persistence", "--output-format", "json", "--max-budget-usd", BUDGET_USD]
+PROMPT = """다음 요청에 맞는 에이전트 스킬을 만들어 주세요.
 
-PROMPT = """너는 에이전트 스킬 작성자다. 아래 [요청]에 맞는 스킬 폴더 하나를 현재 작업 폴더 안에 만든다.
-- 폴더 이름은 영문 소문자·숫자·하이픈(예: pdf-summary). 그 안에 SKILL.md를 둔다.
-- SKILL.md 맨 위는 ---로 감싼 앞부분이고, name(폴더 이름과 같게)과 description을 적는다.
-  description에는 무엇을 하는 스킬인지와 언제 쓰는지(사용자가 할 법한 말)를 함께 적는다.
-- 본문은 에이전트에게 주는 지시문이다. 명령형으로, 단계별로, 짧고 구체적으로 쓴다.
-  길어지는 참고 자료만 하위 폴더(references/ 등)로 나눈다. 스크립트는 꼭 필요할 때만 만들고, SKILL.md에 용도를 적는다.
-- 스킬 글은 [요청]과 같은 언어로 쓴다.
-- 현재 작업 폴더 밖은 읽거나 쓰지 않는다. 스킬 폴더는 하나만 만든다.
-- 끝나면 만든 폴더 이름과 한 줄 요약만 답한다.
+요청: {request}
 
-[요청]
+규칙:
+- 현재 폴더 안에 스킬 이름(영문 소문자·숫자·하이픈, 예: my-skill)과 같은 폴더를 하나만 만들고, 그 안에 SKILL.md를 쓰세요.
+- SKILL.md 맨 위에 YAML 머리말로 name(폴더 이름과 같게)과 description(언제 이 스킬을 쓰는지)을 적으세요.
+- 보조 파일이 꼭 필요하면 같은 스킬 폴더 안에만 두세요.
+- 현재 폴더 밖은 읽지도 쓰지도 마세요. 명령은 실행하지 마세요.
+- 다 만들면 한 줄로 무엇을 만들었는지만 답하세요.
 """
 
 
-class Cancelled(mgr.ManagerError):
-    pass
-
-
-def known_paths() -> list[Path]:
-    """Where Claude Code's installers put `claude` when PATH does not list it."""
-    exe = "claude.exe" if plat.WIN else "claude"
-    out = [Path.home() / ".local" / "bin" / exe, mgr.CLAUDE_HOME / "local" / exe]  # native installer, older local install
-    if plat.WIN:
-        out.append(Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / "claude.cmd")
-    else:
-        out += [Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude")]
-    return out
-
-
-def find_cli() -> Path | None:
-    return plat.find_executable("claude", known_paths())
-
-
-def availability() -> tuple[Path | None, str]:
-    """(the claude program or None, what to tell the user about it)."""
-    cli = find_cli()
-    if cli:
-        return cli, f"{AGENT}를 찾았습니다. {'·'.join(NOT_YET)}는 아직 지원하지 않습니다."
-    return None, (f"{AGENT}(claude 명령)를 이 PC에서 찾지 못했습니다. 설치하고 로그인하면 여기서 에이전트로 스킬을 만들 수 있습니다. "
-                  f"지금은 '새로 만들기' 탭의 템플릿을 쓰세요. ({'·'.join(NOT_YET)}는 아직 지원하지 않습니다)")
+class Cancelled(Exception):
+    """The user pressed 취소."""
 
 
 @dataclass
 class Draft:
-    root: Path  # the scratch folder: everything the agent wrote is under it
-    dir: Path  # the skill folder it made
-    note: str  # the agent's closing words
+    root: Path  # the temp folder the agent worked in
+    skill_dir: Path
+    name: str
+    skill_md: str
+    files: list[str]  # relative to skill_dir
     seen: bool = False
 
-    @property
-    def name(self) -> str:
-        return self.dir.name
-
-    def files(self) -> list[str]:
-        return sorted(p.relative_to(self.dir).as_posix() for p in self.dir.rglob("*") if p.is_file())
-
     def preview(self) -> str:
-        """SKILL.md and the file list, for the user to read before installing. Producing it is what unlocks install_draft()."""
-        text = (self.dir / "SKILL.md").read_text(encoding="utf-8", errors="replace")
-        files = self.files()  # generate() refused drafts whose SKILL.md or file list would not fit here, so nothing is cut
-        extra = "\n⚠ SKILL.md 외 파일은 이름만 보입니다. 스크립트가 있으면 설치 전에 폴더에서 직접 읽어 보세요." if len(files) > 1 else ""
+        """SKILL.md in full, for the user to read before installing. Producing it is what unlocks install_draft()."""
         self.seen = True
-        return f"{text}\n\n──────────\n파일 {len(files)}개\n" + "\n".join(files) + extra
-
-    def discard(self) -> None:
-        shutil.rmtree(self.root, ignore_errors=True)  # our own scratch folder, never anything of the user's
+        return self.skill_md
 
 
-class Job:
-    """Lets another thread stop a running agent."""
+def agent_status() -> tuple[Path | None, str]:
+    """-> (the claude command or None, a line for the user)"""
+    exe = plat.find_claude()
+    if exe:
+        return exe, f"{SUPPORTED}로 만들 수 있습니다."
+    return None, (f"{SUPPORTED} 명령을 이 PC에서 찾지 못했습니다. 설치하면 여기서 만들 수 있습니다. "
+                  f"{', '.join(UNSUPPORTED)}는 아직 지원하지 않습니다. 지금은 '새로 만들기' 탭의 템플릿을 쓰세요.")
 
-    def __init__(self) -> None:
-        self.stop = threading.Event()
-        self.proc: subprocess.Popen | None = None
 
-    def cancel(self) -> None:
-        self.stop.set()
-        if self.proc:
-            _kill(self.proc)
+def discard(draft: Draft) -> None:
+    shutil.rmtree(draft.root, ignore_errors=True)  # our own temp folder, never the user's files
 
 
 def _kill(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
-    if plat.WIN:  # /T: the agent's own child processes too (a .cmd shim starts node)
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, creationflags=plat.NO_WINDOW)
-    else:
-        proc.kill()
+    if plat.WIN:  # also the helpers the agent started
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, creationflags=plat.NO_WINDOW)
+    proc.kill()
+    proc.communicate()
 
 
 def _why(text: str) -> str:
-    text = text.strip()[-400:] or "이유를 알 수 없습니다"
     hint = "\nClaude Code가 오래된 것 같습니다. 최신 버전으로 업데이트하세요." if "unknown option" in text.lower() else ""
-    return f"에이전트가 오류로 끝났습니다: {text}{hint}"
+    return text.strip()[-600:] + hint
 
 
-def _run(cli: list[str], work: Path, request: str, job: Job, timeout: int) -> str:
-    args = [*cli, "-p", "--restricted", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--no-session-persistence",
-            "--output-format", "json", "--max-budget-usd", BUDGET_USD, "--tools", TOOLS, "--allowedTools", TOOLS]
-    try:
-        proc = subprocess.Popen(args, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                encoding="utf-8", errors="replace", creationflags=plat.NO_WINDOW)
-    except OSError as e:
-        raise mgr.ManagerError(f"에이전트를 실행하지 못했습니다: {e}") from e
-    with proc:
-        job.proc = proc
-        deadline, data = time.monotonic() + timeout, PROMPT + request
-        while True:
-            if job.stop.is_set():
+def _run(cmd: list[str], request: str, cwd: Path, cancel: threading.Event, timeout: float) -> str:
+    proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace", creationflags=plat.NO_WINDOW)
+    stdin, end = PROMPT.format(request=request), time.monotonic() + timeout
+    while True:
+        try:
+            out, err = proc.communicate(stdin, timeout=0.3)
+            break
+        except subprocess.TimeoutExpired:
+            stdin = None  # sent on the first call
+            if cancel.is_set():
                 _kill(proc)
-                raise Cancelled("취소했습니다")
-            if time.monotonic() > deadline:
+                raise Cancelled from None
+            if time.monotonic() > end:
                 _kill(proc)
-                raise mgr.ManagerError(f"시간 초과: {timeout // 60}분 안에 끝나지 않아 멈췄습니다")
-            try:
-                out, err = proc.communicate(data, timeout=0.3)
-                break
-            except subprocess.TimeoutExpired:
-                data = None  # already sent; a retry may not send input again
-    if job.stop.is_set():  # cancelled just as it was finishing
-        raise Cancelled("취소했습니다")
+                raise mgr.ManagerError(f"{int(timeout)}초 안에 끝나지 않아 멈췄습니다. 요청을 더 작게 나눠 다시 해 보세요.") from None
     if proc.returncode:
-        raise mgr.ManagerError(_why(err or out))
+        raise mgr.ManagerError(f"에이전트가 실패했습니다 (종료 코드 {proc.returncode}):\n{_why(err or out)}")
     return out
 
 
-def generate(request: str, cli: list[str], job: Job | None = None, timeout: int = TIMEOUT) -> Draft:
-    """Run the agent in a scratch folder and return what it made. `request` is the only thing sent to it. Blocks: call from a thread."""
-    request = request.strip()
+def _collect(root: Path) -> Draft:
+    """Check what the agent left in `root` and turn it into a Draft."""
+    skills = [d for d in root.iterdir() if d.is_dir() and (d / "SKILL.md").is_file()]
+    if len(skills) != 1:
+        raise mgr.ManagerError("에이전트가 스킬 폴더(SKILL.md가 든 폴더) 하나를 만들지 못했습니다." if not skills
+                               else f"스킬 폴더가 {len(skills)}개 만들어졌습니다. 하나씩 요청해 주세요.")
+    d, total, files = skills[0], 0, []
+    if not mgr.NAME_RE.fullmatch(d.name):
+        raise mgr.ManagerError(f"만들어진 폴더 이름을 스킬 이름으로 쓸 수 없습니다: {d.name}")
+    for dirpath, dirs, names in os.walk(d):
+        for n in dirs + names:
+            p = Path(dirpath, n)
+            if mgr.is_link(p) or p.is_symlink():
+                raise mgr.ManagerError(f"링크가 들어 있어 쓰지 않습니다: {p.relative_to(d)}")
+        for n in names:
+            total += (Path(dirpath) / n).stat().st_size
+            files.append((Path(dirpath) / n).relative_to(d).as_posix())
+    if total > MAX_BYTES:
+        raise mgr.ManagerError("만들어진 파일이 너무 큽니다")
+    if not mgr.parse(d / "SKILL.md")["desc"]:
+        raise mgr.ManagerError("SKILL.md 머리말에 description이 없습니다. 다시 만들어 보세요.")
+    text = (d / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+    if len(text) > MAX_CHARS or len(files) > MAX_FILES:
+        raise mgr.ManagerError("만들어진 스킬이 너무 커서 설치 전에 다 읽어 볼 수 없어 쓰지 않습니다. 요청을 줄여 다시 시도하세요.")
+    return Draft(root, d, d.name, text, sorted(files))
+
+
+def generate(request: str, cancel: threading.Event, base_cmd: list[str] | None = None, timeout: float = TIMEOUT) -> Draft:
+    """Ask the agent for a skill. Slow: call it from a worker thread. -> a Draft to show the user (nothing is installed).
+    Only `request` is sent to the agent; `base_cmd` is for tests."""
+    request = " ".join(request.split())
     if not request:
-        raise mgr.ManagerError("만들고 싶은 스킬을 적어 주세요")
+        raise mgr.ManagerError("어떤 스킬이 필요한지 적어 주세요")
     if len(request) > MAX_REQUEST:
         raise mgr.ManagerError(f"요청이 너무 깁니다 ({len(request)}자, 최대 {MAX_REQUEST}자)")
-    root = Path(tempfile.mkdtemp(prefix="skilldesk-agent-")).resolve()
-    work = root / "work"
-    work.mkdir()
+    if base_cmd is None:
+        exe = plat.find_claude()
+        if not exe:
+            raise mgr.ManagerError(agent_status()[1])
+        base_cmd = [str(exe)]
+    root = Path(tempfile.mkdtemp(prefix="skilldesk-agent-"))
     try:
-        out = _run(cli, work, request, job or Job(), timeout)
+        out = _run([*base_cmd, *FLAGS], request, root, cancel, timeout)
         try:
             res = json.loads(out)
         except ValueError:
-            res = {"result": out}
-        note = str(res.get("result") or "").strip()
-        if res.get("is_error"):
-            raise mgr.ManagerError(_why(note))
-        found = mgr.discover(work)
-        if len(found) != 1 or found[0].parent != work:
-            hint = f"\n에이전트의 말: {note[:300]}" if note else ""
-            raise mgr.ManagerError(f"스킬 폴더 하나를 기대했지만 {len(found)}개가 만들어졌습니다.{hint}")
-        d = found[0]
-        if not mgr.NAME_RE.fullmatch(d.name):
-            raise mgr.ManagerError(f"에이전트가 정한 폴더 이름을 쓸 수 없습니다: {d.name}\n이름은 영문·숫자·-_. 만 쓸 수 있습니다")
-        if any(mgr.is_link(p) for p in d.rglob("*")):
-            raise mgr.ManagerError("만들어진 폴더에 바로가기(링크)가 들어 있어 쓰지 않습니다")
-        draft = Draft(root, d, note)
-        if len((d / "SKILL.md").read_text(encoding="utf-8", errors="replace")) > PREVIEW_CHARS or len(draft.files()) > PREVIEW_FILES:
-            raise mgr.ManagerError("만들어진 스킬이 너무 커서 미리보기로 다 볼 수 없어 쓰지 않습니다. 요청을 줄여 다시 시도하세요")
-        return draft
+            res = {}  # not the JSON we asked for: judge by what is in the folder
+        if isinstance(res, dict) and res.get("is_error"):
+            raise mgr.ManagerError(f"에이전트가 실패했습니다: {_why(str(res.get('result') or ''))}")
+        return _collect(root)
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
         raise
 
 
-def install_draft(draft: Draft, agents: list[str]) -> list[mgr.Result]:
-    """Move the reviewed draft into the app's own skills folder and link it into the agents, like a skill made in the 새로 만들기 tab."""
+def install_draft(draft: Draft, agents: list[str]) -> tuple[Path, list[mgr.Result]]:
+    """The only step that touches the user's folders: copy the previewed skill into the store and link it, like `mgr.create`."""
     if not draft.seen:
         raise mgr.ManagerError("미리보기로 내용을 확인한 뒤에만 설치할 수 있습니다")
-    target = mgr.STORE / "skills" / draft.name
-    if target.exists():
+    dest = mgr.STORE / "skills" / draft.name
+    if dest.exists():
         raise mgr.ManagerError(f"이미 만든 스킬입니다: {draft.name}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(draft.dir), target)
-    results = mgr.install([target], agents)
+    shutil.copytree(draft.skill_dir, dest)
+    results = mgr.install([dest], agents)
     if not any(r.status in ("installed", "replaced") for r in results):
-        shutil.move(str(target), str(draft.dir))  # keep the draft so the user can still read it
+        shutil.rmtree(dest)  # only the copy we just made
         raise mgr.ManagerError(f"선택한 에이전트에 같은 이름의 스킬이 이미 있어 설치하지 않았습니다: {draft.name}")
-    draft.discard()
-    return results
+    discard(draft)
+    return dest, results

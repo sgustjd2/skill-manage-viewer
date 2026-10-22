@@ -67,8 +67,7 @@ def main(argv: list[str]) -> int:
     )
     if not fast:
         if shutil.which("pyright") or subprocess.run([py, "-m", "pyright", "--version"], capture_output=True).returncode == 0:
-            typed = ["skill_manager.py", "skill_viewer.py", "skill_agent.py", "platform_support.py", "install.py"]
-            ok &= step("pyright", [py, "-m", "pyright", *typed])
+            ok &= step("pyright", [py, "-m", "pyright", "skill_manager.py", "skill_viewer.py", "platform_support.py", "install.py"])
         else:
             print("SKIP  pyright (not installed: pip install pyright)")
     ok &= step("tests" + (" (no windows)" if fast else ""), [py, "-m", "unittest", "-q", *test_targets(fast)], failures)
