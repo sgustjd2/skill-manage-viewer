@@ -24,6 +24,7 @@ from PIL import ImageGrab
 
 import install
 import platform_support as plat
+import skill_agent
 import skill_harness as hn
 import skill_manager as mgr
 import skill_update as upd
@@ -897,6 +898,54 @@ class PanelTest(unittest.TestCase):
         self.shot(dlg.win, "t6_dialog_new")
         dlg.close()
 
+    def test_06b_add_dialog_agent(self):
+        """The agent tab asks first, shows the result, and links nothing until 설치 is pressed."""
+        app = self.app
+        app.add_dialog()
+        dlg = app.dialog
+        dlg.show("에이전트로 만들기")
+        folder = self.tmp / "agent-draft/note-taker"
+        write_skill(folder, "회의록을 정리할 때 쓴다")
+        draft = skill_agent.Draft(folder.parent, folder, "note-taker", (folder / "SKILL.md").read_text(encoding="utf-8"), ["SKILL.md"])
+        dlg.request.set("회의록 정리 스킬")
+        with (mock.patch.object(skill_agent.plat, "find_claude", return_value=Path("claude")),
+              mock.patch.object(skill_agent, "generate", return_value=draft) as gen):
+            dlg.show("에이전트로 만들기")
+            dlg.request.set("회의록 정리 스킬")
+            with mock.patch.object(v.messagebox, "askokcancel", return_value=False) as ask:
+                dlg.agent_start()  # declined: the agent is never started
+            ask.assert_called_once()
+            gen.assert_not_called()
+            with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+                dlg.agent_start()
+            self.settle(lambda: dlg.draft is not None)
+        self.assertIn("note-taker", dlg.files.cget("text"))
+        self.assertIn("note-taker", dlg.preview.get("1.0", "end"))
+        self.assertFalse(mgr.is_link(mgr.AGENT_DIRS["Claude Code"] / "note-taker"))  # previewed, not installed
+        self.shot(dlg.win, "t6b_dialog_agent")
+        dlg.agents["Codex"].set(False)
+        dlg.agents["Antigravity"].set(False)
+        dlg.agent_install()
+        self.settle(lambda: dlg.draft is None)
+        self.assertTrue(mgr.is_link(mgr.AGENT_DIRS["Claude Code"] / "note-taker"))
+        self.assertFalse(folder.exists())  # the temp folder is gone
+        dlg.close()
+
+    def test_06c_add_dialog_agent_missing_command(self):
+        app = self.app
+        app.add_dialog()
+        dlg = app.dialog
+        with mock.patch.object(skill_agent.plat, "find_claude", return_value=None):
+            dlg.show("에이전트로 만들기")
+            dlg.request.set("무언가")
+            with mock.patch.object(v.messagebox, "askokcancel") as ask:
+                dlg.agent_start()  # the button is disabled but Return in the entry still calls this
+            ask.assert_not_called()
+            self.assertIn("새로 만들기", dlg.status.cget("text"))
+            self.assertFalse(dlg.running)
+            self.assertEqual(str(dlg.make_btn.cget("state")), "disabled")
+        dlg.close()
+
     def test_07_add_dialog_link(self):
         app = self.app
         app.add_dialog()
@@ -1134,7 +1183,7 @@ class PanelTest(unittest.TestCase):
         app.root.update()
         check(app.popup.win)
         app.close_popup()
-        for page in ("링크로 설치", "새로 만들기"):
+        for page in ("링크로 설치", "새로 만들기", "에이전트로 만들기"):
             dlg.show(page)
             for win in (app.root, dlg.win, app.detail_win.win):
                 check(win)

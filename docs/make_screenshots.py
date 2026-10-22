@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import platform_support as plat  # noqa: E402
+import skill_agent  # noqa: E402
 import skill_harness as hn  # noqa: E402
 import skill_manager as mgr  # noqa: E402
 import skill_viewer as v  # noqa: E402
@@ -195,6 +196,18 @@ def main() -> None:
             dlg.name.set("release-notes")
             dlg.desc.set("Write release notes from merged pull requests")
             shot(dlg.win, "add-new")
+            plat.find_claude = lambda: Path("claude")  # as if the command is installed, whatever this PC has
+            dlg.show("에이전트로 만들기")
+            dlg.request.set("회의록을 결정 사항과 할 일로 정리하는 스킬")
+            folder = t / "agent-draft/meeting-minutes"
+            write_skill(folder, "회의록을 결정 사항과 할 일 목록으로 정리할 때 사용합니다.")
+            with (folder / "SKILL.md").open("a", encoding="utf-8") as f:
+                f.write("\n# 회의록 정리\n\n1. 회의록 전체를 읽습니다.\n2. 결정 사항과 할 일을 나눠 적습니다.\n")
+            md = (folder / "SKILL.md").read_text(encoding="utf-8")
+            dlg.draft = skill_agent.Draft(folder.parent, folder, folder.name, md, ["SKILL.md"])
+            dlg._agent_state()
+            shot(dlg.win, "add-agent")
+            dlg.draft = None  # the temp folder belongs to the demo world, not to close() to delete
             dlg.show("추천")  # the bundled skills.sh snapshot; the demo skills above that it lists show as installed
             shot(dlg.win, "add-recommended")
             dlg.close()

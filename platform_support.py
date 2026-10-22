@@ -7,6 +7,7 @@ Linux is not a target, but the POSIX branches are what the macOS ones fall back 
 import contextlib
 import ctypes
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,19 @@ def unlink_dir(p: Path) -> None:
         os.rmdir(p)  # removes junctions and directory symlinks alike, never their target
     else:
         p.unlink() if p.is_symlink() else os.rmdir(p)
+
+
+# ---- finding agent CLIs --------------------------------------------------------------------------
+def find_claude() -> Path | None:
+    """The Claude Code command, or None. The PATH first, then the places its installers put it (often not on the PATH)."""
+    if found := shutil.which("claude"):
+        return Path(found)
+    home = Path.home()
+    names = ("claude.exe", "claude.cmd") if WIN else ("claude",)
+    folders = [home / ".local/bin", home / ".claude/local"]
+    folders += [Path(os.environ["APPDATA"]) / "npm"] if WIN and os.environ.get("APPDATA") else \
+        [Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+    return next((f / n for f in folders for n in names if (f / n).is_file()), None)
 
 
 # ---- opening things ------------------------------------------------------------------------------

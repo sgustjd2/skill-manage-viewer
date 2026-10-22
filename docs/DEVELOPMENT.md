@@ -98,6 +98,7 @@ python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들
 skill-manage-viewer/
 ├─ skill_viewer.py          화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴
 ├─ skill_manager.py         일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
+├─ skill_agent.py           에이전트(Claude Code)에게 스킬을 만들게 함: 임시 폴더에서 실행·시간 제한·취소, 결과 검사(Draft), 미리보기 뒤 설치 (Tk 없음)
 ├─ skill_harness.py         프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
 ├─ skill_usage.py           Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 ├─ platform_support.py      OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
@@ -112,6 +113,7 @@ skill-manage-viewer/
 ├─ start.bat / start.command  더블클릭 실행 (Windows / macOS)
 ├─ requirements.txt         실행에 필요한 패키지
 ├─ test_manager.py          skill_manager 테스트
+├─ test_agent.py            skill_agent 테스트: 가짜 에이전트로 감지·미리보기 뒤 설치·임시 폴더·실패·시간 초과·취소
 ├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
 ├─ test_harness.py          skill_harness 테스트 (임시 폴더)
 ├─ test_install.py          install.py 테스트
@@ -274,6 +276,12 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 1. `platform_support.py`에 함수를 만들고 Windows / macOS 분기를 그 안에 둡니다.
 2. 두 OS에서 같아야 하는 동작은 `test_viewer.PlatformTest`에 테스트를 추가합니다. 한 OS에서만 의미 있는 검사는 `if plat.WIN:` 또는 `@unittest.skipUnless`로 감쌉니다.
 3. PR을 올리면 CI에서 두 OS 결과를 확인합니다.
+
+### 에이전트로 스킬 만들기를 고칠 때
+
+- 실행 인자(`skill_agent.FLAGS`)는 `claude --help`에서 확인한 것만 씁니다(확인한 버전 2.1.302). `--restricted`가 셸·웹 도구를 빼고 파일 도구를 작업 폴더에 가두며, `--permission-prompts none`이 묻는 동작을 거부로 바꿉니다. 인자를 바꾸면 임시 폴더 밖 쓰기가 거부되는지 직접 확인하세요.
+- 에이전트 명령 찾기는 `platform_support.find_claude()`(PATH → 설치 프로그램이 두는 폴더)입니다. Codex·Antigravity는 비대화형 실행 방식을 확인하기 전에는 더하지 않습니다.
+- 테스트는 실제 에이전트를 실행하지 않습니다. `test_agent.py`의 가짜 실행 파일이나 `generate`를 목으로 바꿔 쓰세요.
 
 ### 새 링크 형식을 받게 할 때
 
