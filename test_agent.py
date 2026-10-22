@@ -23,7 +23,7 @@ Path("prompt.txt").write_text(prompt, encoding="utf-8")
 Path("argv.json").write_text(json.dumps(sys.argv[2:]), encoding="utf-8")
 Path("cwd.txt").write_text(os.getcwd(), encoding="utf-8")
 if mode == "fail":
-    print("로그인이 필요합니다", file=sys.stderr); sys.exit(3)
+    sys.stderr.buffer.write("로그인이 필요합니다".encode("utf-8")); sys.exit(3)  # UTF-8 like the real agent, not the console code page
 if mode == "oldcli":
     print("error: unknown option '--restricted'", file=sys.stderr); sys.exit(1)
 if mode == "apierror":
@@ -179,6 +179,14 @@ class AgentTest(unittest.TestCase):
             with self.subTest(mode), self.assertRaises(mgr.ManagerError) as cm:
                 self.gen(mode)
             self.assertIn(word, str(cm.exception))
+        self.assertTrue(all(not Path(p).exists() for p in self.made))
+
+    def test_a_draft_too_big_to_read_before_installing_is_refused(self):
+        with mock.patch.object(sa, "MAX_FILES", 1), self.assertRaises(mgr.ManagerError) as cm:
+            self.gen("ok")  # SKILL.md plus ref.txt: one file more than allowed
+        self.assertIn("너무 커서", str(cm.exception))
+        with mock.patch.object(sa, "MAX_CHARS", 10), self.assertRaises(mgr.ManagerError):
+            self.gen("ok")
         self.assertTrue(all(not Path(p).exists() for p in self.made))
 
     def test_empty_request_never_starts_the_agent(self):

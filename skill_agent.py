@@ -24,6 +24,8 @@ SUPPORTED = "Claude Code"
 UNSUPPORTED = ("Codex", "Antigravity")  # no checked way to run them non-interactively yet
 TIMEOUT = 600  # seconds; writing a skill takes a minute or two
 MAX_BYTES = 5_000_000  # a draft bigger than this is not a skill
+MAX_CHARS, MAX_FILES = 20_000, 60  # more than this is too much to read in the preview before installing
+EXTRA_NOTE = "SKILL.md 외 파일은 이름만 보입니다. 스크립트가 있으면 설치 전에 읽어 보세요."
 TOOLS = "Read,Write,Edit,Glob,Grep"
 BUDGET_USD = "2"  # most one run may cost
 # Flags below are all from `claude --help`: --restricted drops the shell/web tools, ignores the user's settings files and keeps
@@ -131,7 +133,10 @@ def _collect(root: Path) -> Draft:
         raise mgr.ManagerError("만들어진 파일이 너무 큽니다")
     if not mgr.parse(d / "SKILL.md")["desc"]:
         raise mgr.ManagerError("SKILL.md 머리말에 description이 없습니다. 다시 만들어 보세요.")
-    return Draft(root, d, d.name, (d / "SKILL.md").read_text(encoding="utf-8", errors="replace"), sorted(files))
+    text = (d / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+    if len(text) > MAX_CHARS or len(files) > MAX_FILES:
+        raise mgr.ManagerError("만들어진 스킬이 너무 커서 설치 전에 다 읽어 볼 수 없어 쓰지 않습니다. 요청을 줄여 다시 시도하세요.")
+    return Draft(root, d, d.name, text, sorted(files))
 
 
 def generate(request: str, cancel: threading.Event, base_cmd: list[str] | None = None, timeout: float = TIMEOUT) -> Draft:
