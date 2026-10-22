@@ -18,12 +18,16 @@ FAKE = r'''
 import json, os, sys, time
 from pathlib import Path
 mode = sys.argv[1]
-prompt = sys.stdin.read()
+prompt = sys.stdin.buffer.read().decode("utf-8")  # the app sends UTF-8 bytes, whatever the console code page is
 Path("prompt.txt").write_text(prompt, encoding="utf-8")
 Path("argv.json").write_text(json.dumps(sys.argv[2:]), encoding="utf-8")
 Path("cwd.txt").write_text(os.getcwd(), encoding="utf-8")
 if mode == "fail":
     print("로그인이 필요합니다", file=sys.stderr); sys.exit(3)
+if mode == "oldcli":
+    print("error: unknown option '--restricted'", file=sys.stderr); sys.exit(1)
+if mode == "apierror":
+    print(json.dumps({"result": "Not logged in", "is_error": True})); sys.exit(0)
 if mode == "hang":
     time.sleep(60)
 if mode == "none":
@@ -98,12 +102,37 @@ class AgentTest(unittest.TestCase):
             self.assertNotIn(private, prompt)  # no local paths or skill lists go to the agent
         flags = json.loads((d.root / "argv.json").read_text(encoding="utf-8"))
         self.assertEqual(flags, sa.FLAGS)
-        for must in ("--restricted", "--tools", "--permission-prompts", "none"):
+        for must in ("--restricted", "--tools", "--permission-prompts", "none", "--max-budget-usd"):
             self.assertIn(must, flags)
+        self.assertEqual(flags[flags.index("--permission-mode") + 1], "dontAsk")
+        tools = flags[flags.index("--tools") + 1]
+        self.assertEqual(sorted(tools.split(",")), ["Edit", "Glob", "Grep", "Read", "Write"])  # no Bash / PowerShell / WebFetch
+        self.assertEqual(flags[flags.index("--allowedTools") + 1], tools)
         self.assertNotIn("--dangerously-skip-permissions", flags)
+
+    def test_install_is_refused_until_the_preview_was_produced(self):
+        d = self.gen("ok")
+        with self.assertRaises(mgr.ManagerError) as cm:
+            sa.install_draft(d, ["Claude Code"])
+        self.assertIn("미리보기", str(cm.exception))
+        self.assertFalse(self.store.exists())
+        self.assertFalse(self.claude.exists())
+        self.assertIn("# my-skill", d.preview())
+        sa.install_draft(d, ["Claude Code"])
+        self.assertTrue(mgr.is_link(self.claude / "my-skill"))
+
+    def test_an_api_error_and_an_old_claude_code_are_explained(self):
+        with self.assertRaises(mgr.ManagerError) as cm:
+            self.gen("apierror")  # exit code 0, but the JSON says is_error
+        self.assertIn("Not logged in", str(cm.exception))
+        with self.assertRaises(mgr.ManagerError) as cm:
+            self.gen("oldcli")
+        self.assertIn("업데이트", str(cm.exception))
+        self.assertTrue(all(not Path(p).exists() for p in self.made))
 
     def test_install_only_after_the_user_presses_install(self):
         d = self.gen("ok")
+        d.preview()
         dest, results = sa.install_draft(d, ["Claude Code"])
         self.assertEqual(dest, self.store / "skills/my-skill")
         self.assertEqual([r.status for r in results], ["installed"])
@@ -113,6 +142,7 @@ class AgentTest(unittest.TestCase):
 
     def test_install_refuses_a_name_that_is_taken(self):
         d = self.gen("ok")
+        d.preview()
         (self.claude / "my-skill").mkdir(parents=True)  # the user's own skill
         with self.assertRaises(mgr.ManagerError):
             sa.install_draft(d, ["Claude Code"])

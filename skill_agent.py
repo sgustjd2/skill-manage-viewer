@@ -7,6 +7,7 @@ The agent only ever works inside a throw-away folder under the system temp folde
 as a Draft, and only `install_draft` (called when the user presses 설치) copies it into the skill store and links it.
 Nothing here touches the user's skills folders before that.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -23,11 +24,14 @@ SUPPORTED = "Claude Code"
 UNSUPPORTED = ("Codex", "Antigravity")  # no checked way to run them non-interactively yet
 TIMEOUT = 600  # seconds; writing a skill takes a minute or two
 MAX_BYTES = 5_000_000  # a draft bigger than this is not a skill
+TOOLS = "Read,Write,Edit,Glob,Grep"
+BUDGET_USD = "2"  # most one run may cost
 # Flags below are all from `claude --help`: --restricted drops the shell/web tools, ignores the user's settings files and keeps
-# file tools inside the working folder; --tools lists the only tools left; --permission-prompts none denies anything that
-# would still ask, so a stray write outside the folder fails instead of waiting for a click.
-FLAGS = ["-p", "--restricted", "--tools", "Read,Write,Edit,Glob,Grep", "--permission-mode", "acceptEdits",
-         "--permission-prompts", "none", "--no-session-persistence"]
+# file tools inside the working folder (--allowedTools alone does NOT: a bare `Write` allow let a write escape, checked by running it);
+# --tools lists the only tools left; --permission-mode dontAsk with --permission-prompts none denies anything not allowed, so a stray
+# write outside the folder fails instead of waiting for a click; --output-format json gives `is_error` and `result`.
+FLAGS = ["-p", "--restricted", "--tools", TOOLS, "--allowedTools", TOOLS, "--permission-mode", "dontAsk",
+         "--permission-prompts", "none", "--no-session-persistence", "--output-format", "json", "--max-budget-usd", BUDGET_USD]
 PROMPT = """다음 요청에 맞는 에이전트 스킬을 만들어 주세요.
 
 요청: {request}
@@ -52,6 +56,12 @@ class Draft:
     name: str
     skill_md: str
     files: list[str]  # relative to skill_dir
+    seen: bool = False
+
+    def preview(self) -> str:
+        """SKILL.md in full, for the user to read before installing. Producing it is what unlocks install_draft()."""
+        self.seen = True
+        return self.skill_md
 
 
 def agent_status() -> tuple[Path | None, str]:
@@ -74,7 +84,12 @@ def _kill(proc: subprocess.Popen) -> None:
     proc.communicate()
 
 
-def _run(cmd: list[str], request: str, cwd: Path, cancel: threading.Event, timeout: float) -> None:
+def _why(text: str) -> str:
+    hint = "\nClaude Code가 오래된 것 같습니다. 최신 버전으로 업데이트하세요." if "unknown option" in text.lower() else ""
+    return text.strip()[-600:] + hint
+
+
+def _run(cmd: list[str], request: str, cwd: Path, cancel: threading.Event, timeout: float) -> str:
     proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace", creationflags=plat.NO_WINDOW)
     stdin, end = PROMPT.format(request=request), time.monotonic() + timeout
@@ -91,7 +106,8 @@ def _run(cmd: list[str], request: str, cwd: Path, cancel: threading.Event, timeo
                 _kill(proc)
                 raise mgr.ManagerError(f"{int(timeout)}초 안에 끝나지 않아 멈췄습니다. 요청을 더 작게 나눠 다시 해 보세요.") from None
     if proc.returncode:
-        raise mgr.ManagerError(f"에이전트가 실패했습니다 (종료 코드 {proc.returncode}):\n{(err or out).strip()[-600:]}")
+        raise mgr.ManagerError(f"에이전트가 실패했습니다 (종료 코드 {proc.returncode}):\n{_why(err or out)}")
+    return out
 
 
 def _collect(root: Path) -> Draft:
@@ -131,7 +147,13 @@ def generate(request: str, cancel: threading.Event, base_cmd: list[str] | None =
         base_cmd = [str(exe)]
     root = Path(tempfile.mkdtemp(prefix="skilldesk-agent-"))
     try:
-        _run([*base_cmd, *FLAGS], request, root, cancel, timeout)
+        out = _run([*base_cmd, *FLAGS], request, root, cancel, timeout)
+        try:
+            res = json.loads(out)
+        except ValueError:
+            res = {}  # not the JSON we asked for: judge by what is in the folder
+        if isinstance(res, dict) and res.get("is_error"):
+            raise mgr.ManagerError(f"에이전트가 실패했습니다: {_why(str(res.get('result') or ''))}")
         return _collect(root)
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
@@ -140,6 +162,8 @@ def generate(request: str, cancel: threading.Event, base_cmd: list[str] | None =
 
 def install_draft(draft: Draft, agents: list[str]) -> tuple[Path, list[mgr.Result]]:
     """The only step that touches the user's folders: copy the previewed skill into the store and link it, like `mgr.create`."""
+    if not draft.seen:
+        raise mgr.ManagerError("미리보기로 내용을 확인한 뒤에만 설치할 수 있습니다")
     dest = mgr.STORE / "skills" / draft.name
     if dest.exists():
         raise mgr.ManagerError(f"이미 만든 스킬입니다: {draft.name}")

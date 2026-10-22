@@ -1516,7 +1516,7 @@ class AddDialog:
         self.preview.config(state="normal")
         self.preview.delete("1.0", "end")
         if self.draft:
-            self.preview.insert("1.0", self.draft.skill_md)
+            self.preview.insert("1.0", self.draft.preview())
             self.files.config(text=f"스킬 이름: {self.draft.name}\n파일{len(self.draft.files)}개: {', '.join(self.draft.files)}")
         else:
             self.files.config(text="")
@@ -1535,7 +1535,8 @@ class AddDialog:
             return
         if not messagebox.askokcancel(
                 "에이전트 실행", f"{skill_agent.SUPPORTED}를 실행해 스킬을 만듭니다.\n\n- 보내는 내용: 입력한 요청문뿐입니다.\n"
-                "- 임시 폴더에서만 파일을 쓰며, 설치는 결과를 본 뒤 직접 누릅니다.\n- 사용 중인 계정의 사용량이 쓰입니다.\n\n실행할까요?",
+                "- 임시 폴더에서만 파일을 쓰며, 설치는 결과를 본 뒤 직접 누릅니다.\n"
+                f"- 사용 중인 계정의 사용량이 쓰입니다 (한 번에 최대 약 {skill_agent.BUDGET_USD}달러).\n\n실행할까요?",
                 parent=self.win):
             return
         if self.draft:
