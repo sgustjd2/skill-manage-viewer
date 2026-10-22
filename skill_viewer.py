@@ -25,9 +25,10 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from tkinter import font as tkfont
-from tkinter import messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
 
 import platform_support as plat
+import skill_harness as hn
 import skill_manager as mgr
 import skill_usage as usage
 import skill_update as upd
@@ -340,7 +341,7 @@ class App:
         self.events: queue.Queue = queue.Queue()
         self.tray = None
         self.tray_proc: subprocess.Popen | None = None
-        self.dialog: AddDialog | SettingsDialog | None = None
+        self.dialog: AddDialog | SettingsDialog | HarnessWindow | None = None
         self.detail_win: DetailDialog | None = None
         self.popup: Popup | None = None
         self._last_toggle = 0.0
@@ -499,6 +500,7 @@ class App:
                                 ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬의 업데이트 확인"),
                                 ("⟳", self.load, "목록 새로고침"),
                                 ("⚙", self.settings_dialog, "설정 (표시할 에이전트)"),
+                                ("프로젝트", self.harness_dialog, "프로젝트별 스킬 세트 (하네스) 관리"),
                                 ("라이트" if self.theme == "dark" else "다크", self.toggle_theme, "밝은/어두운 화면 전환"),
                                 ("–", self.hide, "트레이로 숨기기")):
             self._icon_button(actions, text, cmd, hint).pack(side="left")
@@ -1124,6 +1126,13 @@ class App:
             self.dialog.close()  # one side dialog at a time
         self.dialog = SettingsDialog(self)
 
+    def harness_dialog(self) -> None:
+        if not self.visible:
+            self.show()
+        if self.dialog and self.dialog.win.winfo_exists():
+            self.dialog.close()
+        self.dialog = HarnessWindow(self)
+
     def set_agents(self, agents: list[str]) -> None:
         """Show only these agent tabs (kept in AGENT_DIRS order) and rebuild the panel around them."""
         self.agents = [a for a in AGENTS if a in agents] or self.agents
@@ -1580,6 +1589,375 @@ class SettingsDialog:
 
     def close(self) -> None:
         self.win.destroy()
+
+
+class HarnessWindow:
+    """Per-project skill sets. Left: the projects (folders) the user registered. Right: the selected project's set (a
+    named list of installed skills, ticked here), where to link it, and apply / release. The logic is skill_harness."""
+    W, H = 900, 800
+
+    def __init__(self, app: App):
+        self.app, c = app, app.c
+        self.win = win = app._side_window("프로젝트 하네스", self.W, self.H)
+        win.protocol("WM_DELETE_WINDOW", self.close)
+        win.bind("<Escape>", lambda e: self.close())
+        self.project: str | None = None
+        self.set_name: str | None = None
+        self.creating = False  # "＋ 새 세트" was clicked: an empty set waiting for a name
+        self.name_var = tk.StringVar()
+        self.skill_vars: dict[str, tk.BooleanVar] = {}
+        self.target_vars: dict[str, tk.BooleanVar] = {}
+        self.exclude_var, self.exclude_for = tk.BooleanVar(), None
+        self.data = hn.load()
+
+        head = tk.Frame(win, bg=c["surface"])
+        head.pack(fill="x")
+        app._label(head, "프로젝트 하네스", 16, bold=True, anchor="w", padx=20).pack(fill="x", pady=(14, 0))
+        app._label(head, "프로젝트마다 쓸 스킬 묶음(세트)을 정해 그 프로젝트 폴더에만 연결합니다. 원본 스킬은 그대로 둡니다.", 10,
+                   fg=c["muted"], anchor="w", padx=20).pack(fill="x", pady=(0, 12))
+        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
+        self.page = "세트 편집"
+
+        # bottom first, so the middle takes the height left. Same shape as the skill detail window: tools in an even
+        # 2-column grid, then the destructive and closing actions apart below a rule.
+        bottom = tk.Frame(win, bg=c["bg"])
+        bottom.pack(side="bottom", fill="x", padx=16, pady=(8, 12))
+        self.status = app._label(bottom, "", 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left",
+                                 wraplength=app.px(self.W - 60))
+        self.status.pack(fill="x", pady=(0, 8))
+        grid = tk.Frame(bottom, bg=c["bg"])
+        grid.pack(fill="x")
+        grid.grid_columnconfigure(0, weight=1, uniform="tool")
+        grid.grid_columnconfigure(1, weight=1, uniform="tool")
+        tools = [("세트 저장", self.save_set), ("이 프로젝트에 적용…", self.apply),
+                 ("연결 해제", self.release), ("프로젝트 폴더 열기", self.open_folder)]
+        for i, (text, cmd) in enumerate(tools):
+            app._button(grid, text, cmd).grid(row=i // 2, column=i % 2, sticky="ew", padx=(0, 0 if i % 2 else 6), pady=(0, 6))
+        tk.Frame(bottom, height=1, bg=c["line"]).pack(fill="x", pady=(6, 10))
+        ends = tk.Frame(bottom, bg=c["bg"])
+        ends.pack(fill="x")
+        app._button(ends, "세트 삭제…", self.delete_set, danger=True).pack(side="left")
+        app._button(ends, "닫기", self.close, primary=True).pack(side="right")
+        tk.Frame(win, height=1, bg=c["line"]).pack(side="bottom", fill="x")
+
+        bar, self._restyle = app._tab_bar(win, ["세트 편집", "구조 가이드"], self.show_page)
+        bar.pack(fill="x")
+        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
+        body = self.sets_page = tk.Frame(win, bg=c["bg"])
+        body.pack(fill="both", expand=True)
+        self.guide_page = tk.Frame(win, bg=c["bg"])
+        left = tk.Frame(body, bg=c["rail"], width=app.px(250))
+        left.pack(side="left", fill="y")
+        left.pack_propagate(False)
+        tk.Frame(body, width=1, bg=c["line"]).pack(side="left", fill="y")
+        app._label(left, "프로젝트", 11, bold=True, bg=c["rail"], anchor="w", padx=14).pack(fill="x", pady=(12, 6))
+        row = tk.Frame(left, bg=c["rail"])
+        row.pack(side="bottom", fill="x", padx=10, pady=10)
+        app._button(row, "＋ 폴더 추가", self.add_project).pack(side="left")
+        app._button(row, "제거", self.remove_project).pack(side="right")
+        self.projects = tk.Frame(left, bg=c["rail"])
+        self.projects.pack(fill="both", expand=True)
+        self.right = tk.Frame(body, bg=c["bg"])
+        self.right.pack(side="left", fill="both", expand=True, padx=16, pady=(12, 0))
+        self.refresh()
+
+    # ---- drawing --------------------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Redraw both panes from the saved file and the current choices."""
+        app, c = self.app, self.app.c
+        self.data = hn.load()
+        paths = list(self.data["projects"])
+        if self.project not in paths:
+            self.project = paths[0] if paths else None
+            self.set_name, self.creating = None, False
+        entry = self.data["projects"].get(self.project)
+        if entry and self.set_name is None and not self.creating:
+            self.set_name = entry["set"]
+        for w in self.projects.winfo_children():
+            w.destroy()
+        for p in paths:
+            on = p == self.project
+            bg = c["soft"] if on else c["rail"]
+            cell = tk.Frame(self.projects, bg=bg, cursor="hand2")
+            cell.pack(fill="x")
+            parts = [app._label(cell, Path(p).name or p, 11, bold=on, fg=c["accent"] if on else c["text"], bg=bg, anchor="w",
+                                padx=14, cursor="hand2"),
+                     app._label(cell, ellipsis(tilde(Path(p).parent), 30), 9, fg=c["muted"], bg=bg, anchor="w", padx=14,
+                                cursor="hand2")]
+            parts[0].pack(fill="x", pady=(7, 0))
+            parts[1].pack(fill="x", pady=(0, 7))
+            for w in (cell, *parts):
+                w.bind("<Button-1>", lambda e, p=p: self.select_project(p))
+        if not paths:
+            app._label(self.projects, "아직 등록한 프로젝트가 없습니다.\n아래 '＋ 폴더 추가'로 시작하세요.", 10, fg=c["muted"],
+                       bg=c["rail"], anchor="w", justify="left", padx=14, pady=8).pack(fill="x")
+
+        for w in self.right.winfo_children():
+            w.destroy()
+        if entry is None:
+            app._label(self.right, "프로젝트를 추가하면 여기서 세트를 고르고 연결할 수 있습니다.", 11, fg=c["muted"], bg=c["bg"],
+                       anchor="w").pack(fill="x", pady=8)
+            self.say("")
+            return
+        assert self.project  # entry exists only for a selected project
+        app._label(self.right, Path(self.project).name or self.project, 13, bold=True, bg=c["bg"], anchor="w").pack(fill="x")
+        app._label(self.right, tilde(Path(self.project)), 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x", pady=(0, 10))
+
+        app._label(self.right, "세트", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x")
+        chips = tk.Frame(self.right, bg=c["bg"])
+        chips.pack(fill="x", pady=(2, 8))
+        self.chips: dict[str | None, tk.Label] = {}
+        for name in (*self.data["sets"], None):
+            on = name == self.set_name if name is not None else self.creating
+            chip = app._label(chips, name or "＋ 새 세트", 10, bold=on, fg=c["on_accent"] if on else c["text"],
+                              bg=c["accent"] if on else c["rail"], padx=10, pady=3, cursor="hand2")
+            chip.pack(side="left", padx=(0, 6), pady=(0, 4))
+            chip.bind("<Button-1>", lambda e, n=name: self.choose_set(n))
+            self.chips[name] = chip
+        self.name_var.set(self.set_name or "")
+        name_row = tk.Frame(self.right, bg=c["bg"])
+        name_row.pack(fill="x", pady=(0, 8))
+        app._label(name_row, "이름", 10, fg=c["muted"], bg=c["bg"]).pack(side="left", padx=(0, 8))
+        box, self.name_entry = app._entry(name_row, self.name_var)
+        box.pack(side="left", fill="x", expand=True)
+
+        app._label(self.right, "이 세트에 넣을 스킬 (설치된 스킬 중에서)", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x")
+        saved = set(self.data["sets"].get(self.set_name or "", {}).get("skills", []))
+        installed = sorted({s["path"].name for skills in app.data.values() for s in skills if s["managed"]}, key=str.lower)
+        self.skill_vars = {n: tk.BooleanVar(value=n in saved) for n in installed}
+        self.skill_vars |= {n: tk.BooleanVar(value=True) for n in sorted(saved - set(installed))}  # in the set, no longer installed
+        opts = tk.Frame(self.right, bg=c["bg"])  # packed before the list, so a short window shrinks the list, not these
+        opts.pack(side="bottom", fill="x")
+        self.list = Scroll(self.right, c)
+        self.list.canvas.config(height=app.px(120))
+        self.list.wrap.pack(fill="both", expand=True, pady=(2, 8))
+        for n, var in self.skill_vars.items():
+            r = tk.Frame(self.list.body, bg=c["surface"])
+            r.pack(fill="x", padx=8, pady=1)
+            app._check(r, n, var, bg=c["surface"]).pack(side="left")
+            if n not in installed:
+                app._label(r, "설치되어 있지 않음", 9, fg=c["warn_fg"], bg=c["surface"]).pack(side="left", padx=6)
+        if not self.skill_vars:
+            app._label(self.list.body, "설치된 스킬이 없습니다. ＋ 추가로 먼저 설치하세요.", 10, fg=c["muted"], padx=10, pady=10).pack()
+
+        app._label(opts, "연결할 위치 (프로젝트 폴더 안)", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x")
+        self.target_vars = {t: tk.BooleanVar(value=t in entry["targets"]) for t in hn.PROJECT_DIRS}  # fresh vars: no stale traces
+        for t, var in self.target_vars.items():
+            var.trace_add("write", lambda *_, t=t: self.target_changed(t))
+            app._check(opts, f"{t}   {hn.PROJECT_DIRS[t]}/", var).pack(anchor="w", pady=1)
+        # off unless an earlier apply turned it on; a redraw for the same project keeps what the user just ticked
+        self.exclude_var = tk.BooleanVar(value=self.exclude_var.get() if self.exclude_for == self.project else bool(entry["exclude"]))
+        self.exclude_for = self.project
+        if hn.is_git_repo(self.project):
+            app._check(opts, "git status에 새 파일로 보이지 않게 하기 (.git/info/exclude에 추가)",
+                       self.exclude_var).pack(anchor="w", pady=(6, 0))
+        self.report_state()
+
+    def say(self, text: str, warn: bool = False) -> None:
+        c = self.app.c
+        self.status.config(text=text, fg=c["warn_fg"] if warn else c["muted"])
+
+    def report_state(self) -> None:
+        assert self.project
+        if not Path(self.project).is_dir():
+            self.say("이 프로젝트 폴더를 찾을 수 없습니다. 옮기거나 지웠다면 '제거'로 목록에서 빼세요.", warn=True)
+            return
+        on = hn.applied(self.project)
+        self.say("연결된 스킬: " + ", ".join(on) if on else "아직 이 프로젝트에 연결된 스킬이 없습니다.")
+
+    def show_page(self, name: str) -> None:
+        self.page = name
+        self._restyle(name)
+        self.sets_page.pack_forget()
+        self.guide_page.pack_forget()
+        if name == "세트 편집":
+            self.sets_page.pack(fill="both", expand=True)
+        else:
+            self.guide_page.pack(fill="both", expand=True)
+            self.draw_guide()
+
+    def draw_guide(self) -> None:
+        """Read-only: the how-to steps, then the selected project's agent setup as a tree (what exists, what this app made)."""
+        app, c = self.app, self.app.c
+        for w in self.guide_page.winfo_children():
+            w.destroy()
+        steps = ["1. 왼쪽 '＋ 폴더 추가'로 프로젝트 폴더를 등록합니다.",
+                 "2. 세트 편집에서 이 프로젝트에 쓸 스킬을 골라 세트로 저장합니다.",
+                 "3. '이 프로젝트에 적용'을 누르면 아래 트리의 skills 폴더에 연결이 만들어집니다. '연결 해제'로 되돌립니다.",
+                 "4. CLAUDE.md · AGENTS.md · .mcp.json · settings.json은 프로젝트에서 직접 작성합니다. "
+                 "이 앱은 아직 만들거나 고치지 않고, 있는지만 보여 줍니다."]
+        box = tk.Frame(self.guide_page, bg=c["bg"])
+        box.pack(fill="both", expand=True, padx=20, pady=(14, 0))
+        app._label(box, "하네스 만드는 순서", 11, bold=True, bg=c["bg"], anchor="w").pack(fill="x", pady=(0, 4))
+        for line in steps:
+            app._label(box, line, 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left",
+                       wraplength=app.px(self.W - 60)).pack(fill="x")
+        if not self.project:
+            app._label(box, "\n프로젝트를 등록하면 그 폴더의 구조가 여기에 트리로 나옵니다.", 10, fg=c["muted"], bg=c["bg"],
+                       anchor="w").pack(fill="x")
+            return
+        app._label(box, "프로젝트 구조", 11, bold=True, bg=c["bg"], anchor="w").pack(fill="x", pady=(14, 4))
+        mono = (plat.MONO_FONT, round(10 * plat.FONT_SCALE), "normal", "roman")
+        text = tk.Text(box, font=mono, bg=c["surface"], fg=c["text"], relief="flat", highlightthickness=1,
+                       highlightbackground=c["line"], wrap="none", cursor="arrow", padx=12, pady=10)
+        text.pack(fill="both", expand=True, pady=(0, 8))
+        text.tag_config("missing", foreground=c["muted"])
+        text.tag_config("mine", foreground=c["accent"], font=(*mono[:2], "bold", "roman"))
+        text.tag_config("note", foreground=c["muted"])
+        text.insert("end", f"{Path(self.project).name}/\n")
+        try:
+            rows = hn.guide_tree(self.project)
+        except mgr.ManagerError as e:
+            rows = []
+            text.insert("end", str(e), ("missing",))
+        width = max((len(r["prefix"] + r["name"]) for r in rows), default=0) + 3
+        for r in rows:
+            state = ("mine" if r["owner"] == "harness" else "") if r["exists"] else "missing"
+            mark = "연결" if r["owner"] == "harness" else "있음" if r["exists"] else "없음"
+            text.insert("end", (r["prefix"] + r["name"]).ljust(width), (state,) if state else ())
+            text.insert("end", f"{mark}  ", (state,) if state else ())
+            text.insert("end", r["note"] + "\n", ("note",))
+        text.configure(state="disabled")
+
+    # ---- choices --------------------------------------------------------------------------------
+    def select_project(self, path: str) -> None:
+        self.project, self.set_name, self.creating = path, None, False
+        self.refresh()
+
+    def choose_set(self, name: str | None) -> None:
+        self.set_name, self.creating = name, name is None
+        if name is not None:
+            self.persist()
+        self.refresh()
+        if name is None:
+            self.name_entry.focus_set()
+
+    def targets(self) -> list[str]:
+        return [t for t, v in self.target_vars.items() if v.get()]
+
+    def target_changed(self, name: str) -> None:
+        if not self.targets():  # at least one place stays on: undo the last click
+            self.target_vars[name].set(True)
+            self.say("연결할 위치는 하나 이상 골라야 합니다.", warn=True)
+            return
+        self.persist()
+
+    def persist(self) -> None:
+        if self.project:
+            hn.configure_project(self.project, self.set_name, self.targets())
+
+    def run(self, fn, *args):
+        """Call skill_harness; a failure whose text is fit for the user goes up as a message. -> result, or None
+        (apply, release and remove_project return lists, add_project a key: none of them returns None itself)."""
+        try:
+            return fn(*args)
+        except mgr.ManagerError as e:
+            messagebox.showerror("프로젝트 하네스", str(e), parent=self.win)
+            return None
+
+    # ---- projects -------------------------------------------------------------------------------
+    def add_project(self) -> None:
+        folder = filedialog.askdirectory(parent=self.win, title="프로젝트 폴더 고르기")
+        if folder and (key := self.run(hn.add_project, folder)):
+            self.select_project(key)
+
+    def remove_project(self) -> None:
+        if not self.project:
+            return self.say("제거할 프로젝트를 먼저 고르세요.", warn=True)
+        if not messagebox.askokcancel(
+                "프로젝트 제거",
+                f"'{Path(self.project).name}'을(를) 목록에서 뺍니다.\n이 앱이 만든 스킬 연결도 함께 끊깁니다. "
+                "프로젝트 폴더와 원본 스킬은 그대로입니다.", parent=self.win):
+            return
+        if self.run(hn.remove_project, self.project) is not None:
+            self.project = None
+            self.refresh()
+
+    def open_folder(self) -> None:
+        if self.project:
+            plat.open_folder(Path(self.project))
+
+    # ---- sets -----------------------------------------------------------------------------------
+    def save_set(self) -> str | None:
+        """Save the ticked skills under the typed name and make it this project's set. -> the name, or None."""
+        if not self.project:
+            self.say("프로젝트를 먼저 추가하세요.", warn=True)
+            return None
+        name = " ".join(self.name_var.get().split())
+        try:
+            hn.save_set(name, [n for n, v in self.skill_vars.items() if v.get()])
+        except mgr.ManagerError as e:
+            messagebox.showerror("프로젝트 하네스", str(e), parent=self.win)
+            return None
+        self.set_name, self.creating = name, False
+        self.persist()
+        self.refresh()
+        self.say(f"'{name}' 세트를 저장했습니다.")
+        return name
+
+    def delete_set(self) -> None:
+        if not self.set_name:
+            return self.say("지울 세트를 먼저 고르세요.", warn=True)
+        if not messagebox.askokcancel(
+                "세트 삭제", f"'{self.set_name}' 세트를 지웁니다. 스킬 자체와 이미 만든 연결은 그대로입니다.", parent=self.win):
+            return
+        self.run(hn.delete_set, self.set_name)
+        self.set_name = None
+        self.refresh()
+
+    # ---- apply / release ------------------------------------------------------------------------
+    def apply(self) -> None:
+        if not self.project:
+            return self.say("프로젝트를 먼저 추가하세요.", warn=True)
+        if not self.save_set():
+            return
+        skills = self.data["sets"][self.set_name]["skills"] if self.set_name in self.data["sets"] else []
+        places = ", ".join(f"{hn.PROJECT_DIRS[t]}/" for t in self.targets())
+        text = f"'{self.set_name}' 세트의 스킬 {len(skills)}개를 이 프로젝트의 {places} 에 연결합니다.\n" \
+               "같은 이름의 폴더가 이미 있으면 건드리지 않고 건너뜁니다."
+        if hn.is_git_repo(self.project) and not self.exclude_var.get():
+            text += "\n\n이 프로젝트는 git 저장소입니다. 연결한 폴더가 git status에 새 파일로 나타납니다.\n" \
+                    "보이지 않게 하려면 취소하고 '새 파일로 보이지 않게 하기'를 켠 뒤 다시 적용하세요."
+        if not messagebox.askokcancel("프로젝트에 적용", text, parent=self.win):
+            return
+        out = self.run(hn.apply, self.project, self.exclude_var.get())
+        if out is not None:
+            self.refresh()
+            self.say(*summarize(out))
+
+    def release(self) -> None:
+        if not self.project:
+            return self.say("프로젝트를 먼저 추가하세요.", warn=True)
+        out = self.run(hn.release, self.project)
+        if out is not None:
+            self.refresh()
+            self.say(*summarize(out, release=True))
+
+    def close(self) -> None:
+        self.win.destroy()
+
+
+def ellipsis(text: str, n: int) -> str:
+    return text if len(text) <= n else "…" + text[-(n - 1):]
+
+
+def summarize(results: list, release: bool = False) -> tuple[str, bool]:
+    """Apply / release results -> (one status line, whether something was skipped and needs a warning color)."""
+    by: dict[str, list[str]] = {}
+    for r in results:
+        by.setdefault(r.status, []).append(r.name)
+    parts = []
+    for status, label in (("installed", "새로 연결"), ("exists", "이미 연결됨"), ("removed", "연결 해제"), ("gone", "이미 없음")):
+        if status in by:
+            parts.append(f"{label} {len(by[status])}개")
+    warn = False
+    if "conflict" in by:
+        warn = True
+        parts.append("건너뜀(같은 이름의 폴더가 이미 있어 그대로 둠): " + ", ".join(by["conflict"]))
+    if "missing" in by:
+        warn = True
+        parts.append("설치되어 있지 않아 건너뜀: " + ", ".join(by["missing"]))
+    return (" · ".join(parts) or ("해제할 연결이 없습니다." if release else "연결할 스킬이 없습니다.")), warn
 
 
 class Popup:

@@ -24,6 +24,7 @@ from PIL import ImageGrab
 
 import install
 import platform_support as plat
+import skill_harness as hn
 import skill_manager as mgr
 import skill_update as upd
 import skill_viewer as v
@@ -1157,6 +1158,7 @@ class PanelTest(unittest.TestCase):
         pack = self.tmp / "contrast-pack"
         for n in ("ca", "cb"):
             write_skill(pack / n)
+        proj = hn.add_project(self.tmp)  # any existing folder will do for drawing the harness window
         bad = []
         for _ in range(2):  # light, then dark
             app.set_agent("Claude Code")
@@ -1199,9 +1201,92 @@ class PanelTest(unittest.TestCase):
                     bad += low_contrast(app, dlg.win, app.theme + " dialog, recommended hover")
                     w.event_generate("<Leave>")
             dlg.close()
+            app.harness_dialog()
+            hw = app.dialog
+            hw.select_project(proj)
+            hw.choose_set(None)
+            hw.name_var.set("x")
+            bad += low_contrast(app, hw.win, app.theme + " harness, new set")
+            hw.show_page("구조 가이드")
+            bad += low_contrast(app, hw.win, app.theme + " harness, guide")
+            hw.show_page("세트 편집")
+            for w in walk(hw.win):
+                if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
+                    w.event_generate("<Enter>")
+                    bad += low_contrast(app, hw.win, app.theme + " harness hover")
+                    w.event_generate("<Leave>")
+            hw.close()
             app.toggle_theme()
         self.maxDiff = None
         self.assertEqual(bad, [])
+
+    def test_15_harness_window_sets_a_project_up_and_takes_it_down_again(self):
+        app, claude = self.app, self.tmp / "claude"
+        write_skill(claude / "harness-demo")
+        proj = self.tmp / "harness-proj"
+        proj.mkdir()
+        subprocess.run(["git", "init", "-q", str(proj)], check=True, capture_output=True)
+        exclude = proj / ".git/info/exclude"
+        app.set_agent("Claude Code")
+        app.load()
+        app.harness_dialog()
+        app.root.update()
+        w = app.dialog
+        self.assertIsInstance(w, v.HarnessWindow)
+        with mock.patch.object(v.filedialog, "askdirectory", return_value=str(proj)):
+            w.add_project()
+        self.assertIn("harness-demo", w.skill_vars)
+        self.assertEqual(w.project, str(proj.resolve()))
+        w.choose_set(None)  # a new set, named and ticked here
+        w.name_var.set("web")
+        w.skill_vars["harness-demo"].set(True)
+        link = proj / ".claude/skills/harness-demo"
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=False) as ask:
+            w.apply()  # declined: nothing linked
+        self.assertIn("git status", ask.call_args[0][1])  # a git project is warned before anything is linked
+        self.assertFalse(link.exists())
+        self.assertEqual(hn.load()["sets"]["web"]["skills"], ["harness-demo"])  # the set itself was saved
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.apply()
+        self.assertTrue(mgr.is_link(link))
+        self.assertIn("새로 연결 1개", w.status.cget("text"))
+        self.assertNotIn("harness-demo", exclude.read_text(encoding="utf-8") if exclude.is_file() else "")  # opt-in only
+        w.show_page("구조 가이드")  # read-only tree of the project: our link marked, the user's own file only "있음"
+        (proj / "CLAUDE.md").write_text("x", encoding="utf-8")
+        w.draw_guide()
+        tree = next(x for x in walk(w.guide_page) if isinstance(x, tk.Text)).get("1.0", "end")
+        self.assertIn("harness-demo", tree)
+        self.assertRegex(tree, r"CLAUDE\.md\s+있음")
+        self.assertRegex(tree, r"AGENTS\.md\s+없음")
+        self.assertEqual(w.guide_page.winfo_manager(), "pack")
+        self.assertEqual(w.sets_page.winfo_manager(), "")
+        w.show_page("세트 편집")
+        self.assertEqual(w.sets_page.winfo_manager(), "pack")
+        w.release()
+        self.assertFalse(link.exists())
+        self.assertIn("연결 해제 1개", w.status.cget("text"))
+        w.exclude_var.set(True)
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True) as ask:
+            w.apply()
+        self.assertNotIn("git status", ask.call_args[0][1])
+        self.assertIn("/.claude/skills/harness-demo", exclude.read_text(encoding="utf-8"))
+        write_skill(proj / ".claude/skills/mine")  # the user's own skill beside ours survives removing the project
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.remove_project()
+            self.assertNotIn(str(proj.resolve()), hn.load()["projects"])
+            w.delete_set()  # nothing chosen: says so, asks nothing
+        self.assertFalse(mgr.is_link(link))
+        self.assertTrue((proj / ".claude/skills/mine/SKILL.md").is_file())
+        self.assertNotIn("harness-demo", exclude.read_text(encoding="utf-8"))
+        with mock.patch.object(v.filedialog, "askdirectory", return_value=str(proj)):
+            w.add_project()
+        w.choose_set("web")
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.delete_set()
+        self.assertNotIn("web", hn.load()["sets"])
+        w.close()
+        mgr.remove("Claude Code", "harness-demo")
+        app.load()
 
 
 def rgb(app, color):
