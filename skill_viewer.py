@@ -1517,7 +1517,7 @@ class AddDialog:
         self.preview.delete("1.0", "end")
         if self.draft:
             self.preview.insert("1.0", self.draft.preview())
-            self.files.config(text=f"스킬 이름: {self.draft.name}\n파일{len(self.draft.files)}개: {', '.join(self.draft.files)}")
+            self.files.config(text=f"스킬 이름: {self.draft.name}\n파일 {len(self.draft.files)}개: {', '.join(self.draft.files)}")
         else:
             self.files.config(text="")
         self.preview.config(state="disabled")
