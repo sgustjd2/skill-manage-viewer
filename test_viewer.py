@@ -634,6 +634,19 @@ class PanelTest(unittest.TestCase):
             app.restart_pill.destroy()
             app.restart_pill = None
 
+    def test_03h2_a_data_only_update_does_not_ask_for_a_restart(self):
+        app = self.app
+        done = upd.Result("updated", "", "aaa1111", "bbb2222", ["Chore: 추천 목록 갱신"], data_only=True)
+        with mock.patch.object(upd, "restart") as restart, mock.patch.object(app, "quit") as quit_:
+            app._update_done(done)
+            app.hide()
+            app._update_done(done)  # even with the window hidden
+            app.show()
+        restart.assert_not_called()
+        quit_.assert_not_called()
+        self.assertFalse(app.pending_restart)
+        self.assertNotIn("새 버전 · 다시 시작", texts(app.actions))
+
     def test_03i_update_messages_and_the_on_off_switch(self):
         app = self.app
         with mock.patch.object(upd, "apply", return_value=upd.Result("up-to-date", "", "a", "a")) as apply:
@@ -1002,6 +1015,28 @@ class PanelTest(unittest.TestCase):
             self.assertIn("fresh", texts(dlg.win))
             self.shot(dlg.win, "t7b_dialog_recommended")
             dlg.close()
+
+    def test_07b2_surge_tab_shows_the_gain_and_explains_an_empty_list(self):
+        app = self.app
+        gains = [{"source": "o/pack", "skill": "newbie", "stars": 12000, "gain": 1234},
+                 {"source": "o/other", "skill": "tdd", "stars": 900, "gain": 12}]
+        cases = {"gains": {"surge": gains, "surge_since": "2026-10-20"}, "first day": {}, "quiet day": {"surge_since": "2026-10-20"}}
+        for name, extra in cases.items():
+            with self.subTest(name), mock.patch.object(mgr, "RECOMMENDED", self.recommend_file(**extra)):
+                app.add_dialog()
+                dlg = app.dialog
+                dlg.show("추천")
+                dlg.show_recommended("어제 급등")
+                shown = texts(dlg.win)
+                if name == "gains":
+                    for want in ("+1,234★", "newbie", "o/pack", "+12★", "tdd", "늘어난 스타 수 순 · 2026-10-21 기준 · 2026-10-20 대비"):
+                        self.assertIn(want, shown)
+                    self.shot(dlg.win, "t7b2_dialog_surge")
+                else:
+                    want = "아직 비교할 어제 기록이 없습니다" if name == "first day" else "급등한 스킬이 없습니다"
+                    self.assertTrue(any(want in t for t in shown))
+                    self.assertFalse(any("비어 있습니다" in t for t in shown))
+                dlg.close()
 
     def test_07c_picking_a_recommendation_opens_the_link_tab_and_ticks_that_skill(self):
         app = self.app

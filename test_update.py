@@ -130,6 +130,20 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual(sh(self.app, "rev-list", "--merges", "--count", "HEAD"), "0")  # plain fast-forward, no merge commit
         self.assertEqual(up.check(self.app, self.official).status, "up-to-date")
 
+    def test_a_data_only_update_needs_no_restart_and_no_pip_or_start_check(self):
+        log = self.t / "ran.log"
+        probe = [sys.executable, "-c", f"open({str(log)!r}, 'a').write('ran')"]
+        self.push({"skill_recommend.json": "{}\n"}, "Chore: 추천 목록 갱신")
+        r = up.apply(self.app, self.official, pip_cmd=probe, smoke_cmd=probe)
+        self.assertEqual((r.status, r.data_only, r.changes), ("updated", True, ["Chore: 추천 목록 갱신"]))
+        self.assertEqual((self.app / "skill_recommend.json").read_text(encoding="utf-8"), "{}\n")
+        self.assertFalse(log.exists())
+        # one code file in the same pull, or code in an earlier commit of it, brings the restart back
+        self.push({"skill_recommend.json": "{1}\n"}, "Chore: 추천 목록 갱신")
+        self.push({"a.txt": "1"}, "Feat: 코드 변경")
+        r = self.apply()
+        self.assertEqual((r.status, r.data_only), ("updated", False))
+
     def test_dependencies_are_installed_only_when_requirements_changed(self):
         log = self.t / "pip.log"
         pip = [sys.executable, "-c", f"open({str(log)!r}, 'a').write('ran')"]

@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 import unittest
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -107,11 +108,15 @@ class UpdateTest(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def run_main(self, fetch) -> tuple[int, str]:
+    def run_main(self, fetch, stars=lambda repo: 100, day="2026-10-22") -> tuple[int, str]:
         err = io.StringIO()
-        with mock.patch.object(u, "fetch", side_effect=fetch), redirect_stdout(io.StringIO()), redirect_stderr(err):
+        with (mock.patch.object(u, "fetch", side_effect=fetch), mock.patch.object(u, "fetch_stars", side_effect=stars),
+              mock.patch.object(u, "today", return_value=day), redirect_stdout(io.StringIO()), redirect_stderr(err)):
             code = u.main()
         return code, err.getvalue()
+
+    def written(self) -> dict:
+        return json.loads(self.out.read_text(encoding="utf-8"))
 
     def test_only_the_two_public_pages_are_requested_once(self):
         asked = []
@@ -147,6 +152,58 @@ class UpdateTest(unittest.TestCase):
                 self.assertIn("not updated", err)
                 self.assertEqual(self.out.read_text(encoding="utf-8"), '{"old": true}')
 
+    def test_a_github_failure_leaves_the_old_file_alone(self):
+        def limited(repo):
+            raise urllib.error.HTTPError("https://api.github.com/repos/" + repo, 403, "rate limit exceeded", {}, None)
+        for name, stars in {"rate limited": limited, "bad json": lambda repo: (_ for _ in ()).throw(ValueError("no stars"))}.items():
+            with self.subTest(name):
+                code, err = self.run_main(lambda url: page([sk("a/a", "s", 5000)]), stars=stars)
+                self.assertEqual(code, 1)
+                self.assertIn("not updated", err)
+                self.assertEqual(self.out.read_text(encoding="utf-8"), '{"old": true}')
+
+    # ---- 어제 급등 -------------------------------------------------------------------------------
+    def test_the_first_run_has_nothing_to_compare_and_the_next_day_lists_the_gains(self):
+        pages = lambda url: page([sk("a/a", "s", 5000), sk("b/B", "t", 4000), sk("c/c", "u", 3000), sk("d/d", "v", 2000)])  # noqa: E731
+        counts = {"a/a": 100, "b/B": 500, "c/c": 40, "d/d": 70}
+        self.assertEqual(self.run_main(pages, stars=lambda r: counts[r], day="2026-10-21")[0], 0)
+        first = self.written()
+        self.assertEqual((first["surge"], first["surge_since"]), ([], ""))
+        self.assertEqual(first["stars"], {"2026-10-21": {"a/a": 100, "b/b": 500, "c/c": 40, "d/d": 70}})  # keyed in lower case
+
+        counts = {"a/a": 130, "b/B": 900, "c/c": 45, "d/d": 70}  # +30, +400, +5 (under MIN_GAIN), +0
+        self.assertEqual(self.run_main(pages, stars=lambda r: counts[r], day="2026-10-22")[0], 0)
+        second = self.written()
+        self.assertEqual(second["surge_since"], "2026-10-21")
+        self.assertEqual(second["surge"], [{"source": "b/B", "skill": "t", "stars": 900, "gain": 400},
+                                           {"source": "a/a", "skill": "s", "stars": 130, "gain": 30}])
+        self.assertEqual(sorted(second["stars"]), ["2026-10-21", "2026-10-22"])
+        with mock.patch.object(mgr, "RECOMMENDED", self.out):
+            loaded = mgr.load_recommended()
+        self.assertEqual((loaded["surge"], loaded["surge_since"]), (second["surge"], "2026-10-21"))
+
+    def test_running_twice_in_a_day_still_compares_with_the_day_before(self):
+        pages = lambda url: page([sk("a/a", "s", 5000)])  # noqa: E731
+        self.run_main(pages, stars=lambda r: 100, day="2026-10-21")
+        self.run_main(pages, stars=lambda r: 150, day="2026-10-22")
+        self.run_main(pages, stars=lambda r: 160, day="2026-10-22")
+        got = self.written()
+        self.assertEqual([(e["gain"], e["stars"]) for e in got["surge"]], [(60, 160)])
+        self.assertEqual(got["stars"]["2026-10-22"], {"a/a": 160})
+
+    def test_only_a_few_days_of_counts_are_kept_and_a_repo_without_history_is_skipped(self):
+        for day in ("2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21"):
+            self.run_main(lambda url: page([sk("a/a", "s", 5000)]), day=day)
+        self.assertEqual(sorted(self.written()["stars"]), ["2026-10-19", "2026-10-20", "2026-10-21"])
+        self.run_main(lambda url: page([sk("a/a", "s", 5000), sk("new/repo", "n", 4000)]), stars=lambda r: 999, day="2026-10-22")
+        self.assertEqual([e["source"] for e in self.written()["surge"]], ["a/a"])  # new/repo has no earlier count
+
+    def test_a_repo_that_is_gone_is_left_out_instead_of_failing_the_run(self):
+        code, _ = self.run_main(lambda url: page([sk("a/a", "s", 5000), sk("gone/x", "g", 4000)]),
+                                stars=lambda r: None if r == "gone/x" else 100)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.written()["stars"]["2026-10-22"], {"a/a": 100})
+
 
 class LoaderTest(unittest.TestCase):
     def load(self, content: str | None) -> dict:
@@ -158,7 +215,7 @@ class LoaderTest(unittest.TestCase):
                 return mgr.load_recommended()
 
     def test_a_missing_or_broken_file_is_an_empty_list(self):
-        empty = {"updated": "", "popular": [], "trending": []}
+        empty = {"updated": "", "surge_since": "", "popular": [], "trending": [], "surge": []}
         for content in (None, "", "{not json", "[]", "null", '"text"', "{}", '{"popular": 3, "trending": {"a": 1}, "updated": 7}'):
             with self.subTest(content=content):
                 self.assertEqual(self.load(content), empty)
@@ -168,8 +225,11 @@ class LoaderTest(unittest.TestCase):
         bad = [{"source": "a/b"}, {"source": "../x", "skill": "s", "installs": 1}, {"source": "a/b", "skill": "../s", "installs": 1},
                {"source": "a/b", "skill": "s", "installs": "5"}, {"source": "a/b", "skill": "s", "installs": True}, "x", None, 3,
                {"source": "https://evil/x", "skill": "s", "installs": 1}, {"source": "a.b/c", "skill": "s", "installs": 1}]
-        data = self.load(json.dumps({"updated": "2026-10-21", "popular": [good, *bad], "trending": []}))
-        self.assertEqual(data, {"updated": "2026-10-21", "popular": [good], "trending": []})
+        gain = {"source": "a/b", "skill": "s", "stars": 900, "gain": 40}
+        data = self.load(json.dumps({"updated": "2026-10-21", "surge_since": "2026-10-20", "popular": [good, *bad], "trending": [],
+                                     "surge": [gain, {**gain, "gain": "40"}, {"source": "a/b", "skill": "s", "installs": 5},
+                                               {**gain, "stars": True}]}))
+        self.assertEqual(data, {"updated": "2026-10-21", "surge_since": "2026-10-20", "popular": [good], "trending": [], "surge": [gain]})
 
     def test_the_bundled_snapshot_loads_without_losing_an_entry(self):
         raw = json.loads(mgr.RECOMMENDED.read_text(encoding="utf-8"))

@@ -25,6 +25,7 @@ import skill_manager as mgr
 HERE = Path(__file__).resolve().parent
 OFFICIAL = "sgustjd2/skill-manage-viewer"
 BRANCH = "main"
+DATA_FILES = {"skill_recommend.json"}  # rewritten daily by a workflow; the app re-reads it, so it never needs a restart
 
 
 @dataclass
@@ -34,6 +35,7 @@ class Result:
     old: str = ""
     new: str = ""
     changes: list[str] = field(default_factory=list)  # commit subjects that came in
+    data_only: bool = False  # status "updated" but only DATA_FILES changed: the running code is still current, no restart needed
 
 
 def slug(url: str) -> str:
@@ -89,8 +91,10 @@ def apply(root: Path = HERE, official: str = OFFICIAL, pip_cmd: list[str] | None
     old_full = mgr.git(root, "rev-parse", "HEAD")
     try:
         mgr.git(root, "merge", "--ff-only", "-q", f"origin/{BRANCH}")
-        needs_pip = "requirements.txt" in mgr.git(root, "diff", "--name-only", old_full, "HEAD").splitlines()
-        if needs_pip:
+        files = set(mgr.git(root, "diff", "--name-only", old_full, "HEAD").splitlines())
+        if files <= DATA_FILES:  # nothing runs differently: skip the pip and start-up checks (the loader reads a broken data file as empty)
+            return Result("updated", "", found.old, found.new, found.changes, data_only=True)
+        if "requirements.txt" in files:
             mgr.run(pip_cmd or [sys.executable, "-m", "pip", "install", "-q", "-r", str(root / "requirements.txt")], timeout=300)
         mgr.run(smoke_cmd or [sys.executable, str(root / "skill_viewer.py"), "--check"], timeout=120)
     except mgr.ManagerError as e:
