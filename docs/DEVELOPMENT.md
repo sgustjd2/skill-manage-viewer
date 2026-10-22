@@ -98,6 +98,7 @@ python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들
 skill-manage-viewer/
 ├─ skill_viewer.py          화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴
 ├─ skill_manager.py         일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
+├─ skill_harness.py         프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
 ├─ skill_usage.py           Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 ├─ platform_support.py      OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 ├─ install.py               시작 메뉴 바로 가기 / macOS .app 만들기·지우기
@@ -112,6 +113,7 @@ skill-manage-viewer/
 ├─ requirements.txt         실행에 필요한 패키지
 ├─ test_manager.py          skill_manager 테스트
 ├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
+├─ test_harness.py          skill_harness 테스트 (임시 폴더)
 ├─ test_install.py          install.py 테스트
 ├─ test_recommend.py        추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 ├─ docs/
@@ -193,6 +195,7 @@ python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나�
 | `test_viewer.py` – `PlatformTest` | 폴더 링크 만들기·지우기, 중복 실행 방지, 다시 실행할 때 남기는 "창을 보여 달라" 쪽지(한 번만 읽힘·오래된 쪽지 무시), 우클릭 이벤트, 트레이 명령 허용 목록 |
 | `test_viewer.py` – `CategoryTest` | 한 스킬이 두 카테고리에 들어가지 않는지, 설명 있는 스킬의 카테고리 누락, 색·기준 문장 짝 |
 | `test_viewer.py` – `DiscoveryTest` | 다른 PC 상황: 링크로 설치된 스킬, 순환 링크, 이상한 `SKILL.md`, 없는 에이전트 폴더, 깨진 플러그인 파일, 환경변수 |
+| `test_harness.py` | 세트·프로젝트 저장과 불러오기(이상한 파일 무시, 알 수 없는 키 보존), 적용 시 링크 생성, 해제 시 **이 앱이 만든 링크만** 제거, 같은 이름의 실제 폴더·사용자가 바꾼 링크는 그대로, 없는 프로젝트 폴더·경로 검증, `.git/info/exclude` 추가와 되돌리기(기본 꺼짐), 구조 트리가 아무것도 만들지 않는지 |
 | `test_install.py` | macOS `.app` 구성과 제거 범위(모든 OS), Windows 바로 가기 내용(Windows만) |
 | `test_recommend.py` | 추천 스냅샷: 실제 페이지 모양의 작은 예시로 파싱, GitHub 아닌 출처·저장소별 상한·같은 이름·설치 수 하한 거르기, 형식이 바뀌면 실패, 실패하면 기존 파일 유지, 요청이 두 공개 페이지뿐인지, `load_recommended()`가 없거나 깨진 파일을 빈 목록으로 보는지 (네트워크 없음) |
 | `test_usage.py` | 호출 횟수 집계: 도구 호출과 `/이름`, 달별 합계, 이어받은 대화의 중복, 캐시 재사용, 깨진 입력, 플러그인 접두어, 정리 후보(최근 2개월 기준·해가 바뀔 때·기록이 없을 때), 기록이 시작된 시점 |
@@ -297,6 +300,8 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 
 ## 알려진 한계
 
+- **프로젝트 하네스의 범위**: 세트에는 스킬 이름만 담습니다. `harness.json`의 세트는 키가 있는 딕셔너리(`{"skills": [...]}`)이고 `version` 필드가 있어서 `CLAUDE.md`·훅·MCP 설정을 더하려면 키를 늘리면 되지만, 무엇을 담을지는 아직 정해지지 않았습니다(구조 가이드는 있는지만 보여 줍니다).
+- **프로젝트 폴더의 Windows 링크**: Claude Code 문서는 프로젝트 `.claude/skills`의 심볼릭 링크만 명시하고 junction은 언급하지 않습니다. 사용자 폴더(`~/.claude/skills`)에서 이 앱이 쓰던 junction과 같은 방식이라 같은 동작을 기대하지만, 프로젝트 폴더에서 실제 Claude Code로 확인한 적은 없습니다.
 - **macOS 창 위치**: Tk가 메뉴 막대·Dock 크기를 알려 주지 않아 위 25px, 아래 90px을 비운 근사값으로 놓습니다.
 - **브랜치 이름에 `/`가 있는 링크**: `tree/feature/x/...`는 브랜치를 `feature`로 읽습니다. 저장소 루트 링크를 쓰세요.
 - **삭제한 스킬의 clone**: `~/.skill-manager/sources/`에 남겨 둡니다(다시 설치할 때 빠르도록). 필요하면 직접 지워도 됩니다.

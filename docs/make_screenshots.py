@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import platform_support as plat  # noqa: E402
+import skill_harness as hn  # noqa: E402
 import skill_manager as mgr  # noqa: E402
 import skill_viewer as v  # noqa: E402
 
@@ -228,7 +229,26 @@ def main() -> None:
             shot(app.dialog.win, "settings")
             app.dialog.close()
 
+            work = t / "work"  # three made-up project folders; the first one is a git repo with its set applied
+            for n in ("web-shop", "api-server", "mobile-app"):
+                (work / n).mkdir(parents=True)
+                hn.add_project(work / n)
+            git(t, "init", "-q", str(work / "web-shop"))
+            hn.save_set("웹 개발", ["tdd", "frontend-design", "web-design-guidelines"])
+            hn.save_set("문서 작업", ["pdf", "docx", "xlsx"])
+            web = str((work / "web-shop").resolve())
+            hn.configure_project(web, "웹 개발", ["Claude Code"])
+            hn.apply(web, git_exclude=True)
             app.set_agent("Claude Code")
+            app.harness_dialog()
+            app.dialog.select_project(web)
+            shot(app.dialog.win, "harness")
+            (t / "work/web-shop/CLAUDE.md").write_text("# web-shop\n", encoding="utf-8")
+            app.dialog.show_page("구조 가이드")
+            shot(app.dialog.win, "harness-guide")
+            hn.release(web)  # unlink before the temp folder is removed
+            app.dialog.close()
+
             app.pick(v.USAGE)
             end = time.time() + 15
             while app.usage is None and time.time() < end:  # the counting runs on a worker thread
