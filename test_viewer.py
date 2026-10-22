@@ -883,6 +883,66 @@ class PanelTest(unittest.TestCase):
         self.shot(dlg.win, "t6_dialog_new")
         dlg.close()
 
+    def agent_draft(self, name="agent-made") -> v.sa.Draft:
+        root = Path(tempfile.mkdtemp(prefix="skilldesk-agent-test-", dir=self.tmp))
+        write_skill(root / "work" / name, "에이전트가 쓴 설명")
+        return v.sa.Draft(root, root / "work" / name, "끝")
+
+    def test_06b_add_dialog_agent_tab_asks_first_then_previews_then_installs(self):
+        app = self.app
+        app.add_dialog()
+        dlg = app.dialog
+        with mock.patch.object(v.sa, "availability", return_value=(None, "claude 명령을 이 PC에서 찾지 못했습니다")):
+            dlg.show("에이전트로 만들기")
+        self.assertIsNone(dlg.agent_cli)  # no program: a notice, and no way to start
+        self.assertEqual(dlg.a_make.winfo_manager(), "")
+        self.assertTrue(any("찾지 못했습니다" in str(w.cget("text")) for w in walk(dlg.panel) if isinstance(w, tk.Label)))
+        fake = self.tmp / "fake-claude"
+        with mock.patch.object(v.sa, "availability", return_value=(fake, "Claude Code를 찾았습니다.")):
+            dlg.show("에이전트로 만들기")
+        dlg.request.insert("1.0", "PDF를 요약하는 스킬")
+        with mock.patch.object(v.messagebox, "askyesno", return_value=False), mock.patch.object(v.sa, "generate") as gen:
+            dlg.ask_agent()  # the user says no to the question: the agent is not started
+        gen.assert_not_called()
+        self.assertIsNone(dlg.job)
+        outcomes = ((v.sa.Cancelled("취소했습니다"), "취소했습니다"), (mgr.ManagerError("시간 초과"), "만들지 못했습니다: 시간 초과"))
+        for err, text in outcomes:
+            with mock.patch.object(v.messagebox, "askyesno", return_value=True), mock.patch.object(v.sa, "generate", side_effect=err):
+                dlg.ask_agent()
+                self.settle(lambda: dlg.job is None)
+            self.assertEqual(dlg.status.cget("text"), text)
+            self.assertIsNone(dlg.draft)
+        draft = self.agent_draft()
+        with mock.patch.object(v.messagebox, "askyesno", return_value=True) as ask, mock.patch.object(
+                v.sa, "generate", return_value=draft) as gen:
+            dlg.ask_agent()
+            self.settle(lambda: dlg.draft is not None)
+        self.assertIn("보내는 내용", ask.call_args.args[1])
+        self.assertEqual(gen.call_args.args[:2], ("PDF를 요약하는 스킬", [str(fake)]))  # the request text and nothing else
+        self.assertIn("name: agent-made", dlg.preview.get("1.0", "end"))  # shown, and nothing is installed yet
+        self.assertFalse((mgr.AGENT_DIRS["Claude Code"] / "agent-made").exists())
+        self.assertNotEqual(dlg.a_install.winfo_manager(), "")
+        self.shot(dlg.win, "t6b_dialog_agent")
+        for a, var in dlg.agents.items():
+            var.set(a == "Claude Code")
+        dlg.install_draft()
+        self.assertTrue((mgr.AGENT_DIRS["Claude Code"] / "agent-made/SKILL.md").is_file())
+        self.assertIsNone(dlg.draft)
+        self.assertFalse(draft.root.exists())
+        dlg.close()
+        mgr.remove("Claude Code", "agent-made")
+        app.load()
+
+    def test_06c_closing_the_dialog_stops_the_agent_and_throws_the_draft_away(self):
+        app = self.app
+        app.add_dialog()
+        dlg = app.dialog
+        draft = self.agent_draft("agent-dropped")
+        dlg.draft, dlg.job = draft, mock.Mock()
+        dlg.close()
+        dlg.job.cancel.assert_called_once()
+        self.assertFalse(draft.root.exists())
+
     def test_07_add_dialog_link(self):
         app = self.app
         app.add_dialog()
@@ -1154,6 +1214,15 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, dlg.win, app.theme + " dialog, install enabled")
             dlg.show("새로 만들기")
             bad += low_contrast(app, dlg.win, app.theme + " dialog, new")
+            with mock.patch.object(v.sa, "availability", return_value=(None, "claude 명령을 찾지 못했습니다")):
+                dlg.show("에이전트로 만들기")
+            bad += low_contrast(app, dlg.win, app.theme + " dialog, agent, no program")
+            with mock.patch.object(v.sa, "availability", return_value=(pack, "Claude Code를 찾았습니다.")):
+                dlg.draft = self.agent_draft("ca")
+                dlg.show("에이전트로 만들기")
+            bad += low_contrast(app, dlg.win, app.theme + " dialog, agent, draft")
+            dlg.draft.discard()
+            dlg.draft = None
             both = [{"source": "o/pack", "skill": "tdd", "installs": 12345}, {"source": "o/b", "skill": "newbie", "installs": 9}]
             with mock.patch.object(mgr, "RECOMMENDED", self.recommend_file(popular=both)):
                 dlg.show("추천")

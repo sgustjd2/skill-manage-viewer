@@ -28,6 +28,7 @@ from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog
 
 import platform_support as plat
+import skill_agent as sa
 import skill_manager as mgr
 import skill_usage as usage
 import skill_update as upd
@@ -1279,7 +1280,8 @@ class App:
 
 class AddDialog:
     """Install skills from a link, or create a new one. Both tabs link into the agents you tick. The 추천 tab only lists
-    the bundled skills.sh snapshot: picking a row hands its repo to the link tab, which does the usual download → choose → install."""
+    the bundled skills.sh snapshot: picking a row hands its repo to the link tab, which does the usual download → choose → install.
+    The 에이전트로 만들기 tab has Claude Code write a skill in a scratch folder; it is installed only after the user reads the preview."""
     W, H = 540, 720
     # 추천 tab: sub-tab -> (key in the snapshot, what its install count counts)
     RECOMMENDED = {"인기": ("popular", "누적 설치 수"), "요즘 뜨는": ("trending", "최근 24시간 설치 수")}
@@ -1289,9 +1291,12 @@ class AddDialog:
         self.win = win = app._side_window("스킬 추가", self.W, self.H)
         self.mode = "link"
         self.rec_tab = "인기"
+        self.job: sa.Job | None = None  # the agent run in progress, and the draft it left waiting for review (에이전트로 만들기 tab)
+        self.draft: sa.Draft | None = None
+        self.agent_msg, self.agent_warn = "", False
         self.picks: dict[Path, tk.BooleanVar] = {}
         self.agents = {a: tk.BooleanVar(value=True) for a in app.agents}
-        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기", "추천"], self.show)
+        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기", "추천", "에이전트로 만들기"], self.show)
         bar.pack(fill="x")
         tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
         self.panel = tk.Frame(win, bg=c["bg"])
@@ -1300,6 +1305,10 @@ class AddDialog:
         self.show("링크로 설치")
 
     def close(self) -> None:
+        if self.job:
+            self.job.cancel()
+        if self.draft:
+            self.draft.discard()
         self.win.destroy()
 
     def say(self, text: str, warn: bool = False) -> None:
@@ -1319,7 +1328,8 @@ class AddDialog:
             w.destroy()
         self._restyle(tab)
         self.mode = tab
-        {"링크로 설치": self._build_link, "새로 만들기": self._build_new, "추천": self._build_recommended}[tab]()
+        {"링크로 설치": self._build_link, "새로 만들기": self._build_new, "추천": self._build_recommended,
+         "에이전트로 만들기": self._build_agent}[tab]()
 
     # -- tab 1: install from link
     def _build_link(self) -> None:
@@ -1462,6 +1472,135 @@ class AddDialog:
         self.say(f"만들었습니다: {d}\n편집기에서 SKILL.md 본문을 채워 주세요.")
         self.app.load()
         mgr.open_in_editor(d / "SKILL.md")
+
+    # -- tab 4: have an agent write the skill
+    def _build_agent(self) -> None:
+        app, c, p = self.app, self.app.c, self.panel
+        self.agent_cli, info = sa.availability()
+        wrap = app.px(self.W - 50)
+        self.status = app._label(p, "", 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=wrap)
+        btns = tk.Frame(p, bg=c["bg"])
+        btns.pack(side="bottom", fill="x", pady=(10, 0))
+        self.a_make = app._button(btns, "에이전트로 만들기", self.ask_agent, primary=True)
+        self.a_install = app._button(btns, "확인했으니 설치", self.install_draft, primary=True)
+        self.a_cancel = app._button(btns, "취소", lambda: self.job and self.job.cancel())
+        self.a_discard = app._button(btns, "버리기", self.discard_draft)
+        self.a_close = app._button(btns, "닫기", self.close)
+        if not self.agent_cli:
+            app._label(p, info, 10, fg=c["warn_fg"], bg=c["bg"], anchor="w", justify="left", wraplength=wrap).pack(fill="x")
+            self._agent_ui()
+            return
+        self._agent_checks()
+        app._label(p, info, 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=wrap).pack(fill="x")
+        app._label(p, "어떤 스킬이 필요한지 적으세요. 에이전트에는 이 글만 보냅니다.", 10, fg=c["muted"], bg=c["bg"],
+                   anchor="w").pack(fill="x", pady=(10, 3))
+        self.request, self.preview = self._agent_text(5), self._agent_text(12)
+        self.request.frame.pack(fill="x")  # type: ignore[attr-defined]
+        self.request.focus_set()
+        self.status.pack(fill="x", pady=(8, 4))
+        if self.draft:
+            self._show_preview()
+        elif self.job:
+            self.say("에이전트가 스킬을 만드는 중…")
+        else:
+            self.say(self.agent_msg, self.agent_warn)
+        self._agent_ui()
+
+    def _agent_text(self, height: int) -> tk.Text:
+        app, c = self.app, self.app.c
+        frame = tk.Frame(self.panel, bg=c["surface"], highlightthickness=1, highlightbackground=c["line"], highlightcolor=c["accent"])
+        text = tk.Text(frame, wrap="word", relief="flat", bd=0, padx=12, pady=10, font=app.f(10), height=height, bg=c["surface"],
+                       fg=c["text"], insertbackground=c["text"], selectbackground=c["soft"], selectforeground=c["text"],
+                       highlightthickness=0)
+        text.pack(fill="both", expand=True)
+        text.frame = frame  # type: ignore[attr-defined]
+        return text
+
+    def _agent_ui(self) -> None:
+        """Show the buttons and boxes that fit what is going on: nothing yet, the agent running, or a draft waiting for review."""
+        busy, has = self.job is not None, self.draft is not None
+        for b, show in ((self.a_make, not busy and not has and bool(self.agent_cli)), (self.a_install, has), (self.a_cancel, busy),
+                        (self.a_discard, has), (self.a_close, True)):
+            b.pack_forget()
+            if show:
+                b.pack(side="right", padx=(8, 0))
+        if self.agent_cli:
+            self.request.config(state="disabled" if busy or has else "normal")
+            self.preview.frame.pack_forget()  # type: ignore[attr-defined]
+            if has:
+                self.preview.frame.pack(fill="both", expand=True)  # type: ignore[attr-defined]
+
+    def _show_preview(self) -> None:
+        assert self.draft
+        self.preview.config(state="normal")
+        self.preview.delete("1.0", "end")
+        self.preview.insert("1.0", self.draft.preview())
+        self.preview.config(state="disabled")
+        self.say(f"'{self.draft.name}' 초안입니다. 내용을 읽고 설치하거나 버리세요. 아직 아무것도 설치되지 않았습니다.")
+
+    def ask_agent(self) -> None:
+        request = self.request.get("1.0", "end").strip()
+        if not request:
+            self.say("만들고 싶은 스킬을 적어 주세요", warn=True)
+            return
+        if not messagebox.askyesno(
+                "에이전트 실행",
+                f"{sa.AGENT}를 실행해 스킬 초안을 만듭니다.\n\n"
+                "• 보내는 내용: 위에 적은 요청문뿐입니다 (설치된 스킬·경로는 보내지 않습니다)\n"
+                "• 에이전트는 임시 폴더에서만 쓰고, 파일 읽기·쓰기 외의 도구는 쓰지 못합니다\n"
+                f"• 지금 로그인된 계정의 사용량이 쓰입니다 (한 번에 최대 약 {sa.BUDGET_USD}달러, {sa.TIMEOUT // 60}분)\n"
+                "• 결과는 미리보기로 확인한 뒤 설치를 눌러야 들어갑니다\n\n실행할까요?", parent=self.win):
+            return
+        self.job = job = sa.Job()
+        self.say("에이전트가 스킬을 만드는 중… (보통 20초~몇 분)")
+        self._agent_ui()
+        cli = [str(self.agent_cli)]
+        self.app.bg(lambda: sa.generate(request, cli, job), lambda res: self._agent_done(job, res))
+
+    def _agent_done(self, job: sa.Job, res) -> None:
+        if job is not self.job or not self.win.winfo_exists():  # the window was closed meanwhile: close() already cancelled it
+            if isinstance(res, sa.Draft):
+                res.discard()
+            return
+        self.job = None
+        if isinstance(res, sa.Draft):
+            self.draft = res
+        elif isinstance(res, sa.Cancelled):
+            self.agent_msg, self.agent_warn = "취소했습니다", False
+        else:
+            self.agent_msg, self.agent_warn = f"만들지 못했습니다: {res}", True
+        if self.mode != "에이전트로 만들기":  # the user is on another tab: it shows the outcome when they come back
+            return
+        if self.draft:
+            self._show_preview()
+        else:
+            self.say(self.agent_msg, self.agent_warn)
+        self._agent_ui()
+
+    def install_draft(self) -> None:
+        agents = [a for a, v in self.agents.items() if v.get()]
+        if not agents:
+            self.say("에이전트를 하나 이상 선택하세요", warn=True)
+            return
+        assert self.draft
+        try:
+            sa.install_draft(self.draft, agents)
+        except mgr.ManagerError as e:
+            self.say(str(e), warn=True)
+            return
+        self.agent_msg, self.agent_warn = f"설치했습니다: {self.draft.name}\n상세 화면에서 내용을 고칠 수 있습니다.", False
+        self.draft = None
+        self.say(self.agent_msg)
+        self.app.say("에이전트가 만든 스킬을 설치했습니다")
+        self.app.load()
+        self._agent_ui()
+
+    def discard_draft(self) -> None:
+        if self.draft:
+            self.draft.discard()
+        self.draft, self.agent_msg, self.agent_warn = None, "초안을 버렸습니다", False
+        self.say(self.agent_msg)
+        self._agent_ui()
 
     # -- tab 3: recommended
     def _build_recommended(self) -> None:

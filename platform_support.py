@@ -7,6 +7,7 @@ Linux is not a target, but the POSIX branches are what the macOS ones fall back 
 import contextlib
 import ctypes
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,14 @@ def unlink_dir(p: Path) -> None:
         os.rmdir(p)  # removes junctions and directory symlinks alike, never their target
     else:
         p.unlink() if p.is_symlink() else os.rmdir(p)
+
+
+# ---- finding programs ----------------------------------------------------------------------------
+def find_executable(name: str, known: list[Path]) -> Path | None:
+    """`name` on PATH, else the first of the `known` install locations that holds a file. The app is often started from the
+    Start menu / Spotlight, whose PATH lacks the folders a terminal gets from the user's shell profile."""
+    found = shutil.which(name)
+    return Path(found) if found else next((p for p in known if p.is_file()), None)
 
 
 # ---- opening things ------------------------------------------------------------------------------
