@@ -23,11 +23,11 @@ jobs:
         with:
           python-version: "3.12"
       - id: release
-        run: python tools/release.py "$RUNNER_TEMP/notes.md"
+        run: python tools/release.py release-notes.md  # untracked: only read by the next step
       - if: steps.release.outputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.release.outputs.version }}
         run: |
           git push origin HEAD:main "$TAG"
-          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
