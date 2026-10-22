@@ -28,6 +28,7 @@ from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog
 
 import platform_support as plat
+import skill_agent
 import skill_manager as mgr
 import skill_usage as usage
 import skill_update as upd
@@ -1290,8 +1291,11 @@ class AddDialog:
         self.mode = "link"
         self.rec_tab = "인기"
         self.picks: dict[Path, tk.BooleanVar] = {}
+        self.draft: skill_agent.Draft | None = None  # 에이전트로 만들기: what the agent wrote, waiting for 설치
+        self.cancel = threading.Event()
+        self.running = False
         self.agents = {a: tk.BooleanVar(value=True) for a in app.agents}
-        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기", "추천"], self.show)
+        bar, self._restyle = app._tab_bar(win, ["링크로 설치", "새로 만들기", "에이전트로 만들기", "추천"], self.show)
         bar.pack(fill="x")
         tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
         self.panel = tk.Frame(win, bg=c["bg"])
@@ -1300,6 +1304,9 @@ class AddDialog:
         self.show("링크로 설치")
 
     def close(self) -> None:
+        self.cancel.set()  # stops a running agent; its thread then cleans up its own temp folder
+        if self.draft:
+            skill_agent.discard(self.draft)
         self.win.destroy()
 
     def say(self, text: str, warn: bool = False) -> None:
@@ -1319,7 +1326,8 @@ class AddDialog:
             w.destroy()
         self._restyle(tab)
         self.mode = tab
-        {"링크로 설치": self._build_link, "새로 만들기": self._build_new, "추천": self._build_recommended}[tab]()
+        {"링크로 설치": self._build_link, "새로 만들기": self._build_new, "에이전트로 만들기": self._build_agent,
+         "추천": self._build_recommended}[tab]()
 
     # -- tab 1: install from link
     def _build_link(self) -> None:
@@ -1463,7 +1471,121 @@ class AddDialog:
         self.app.load()
         mgr.open_in_editor(d / "SKILL.md")
 
-    # -- tab 3: recommended
+    # -- tab 3: let the agent write it
+    def _build_agent(self) -> None:
+        app, c, p = self.app, self.app.c, self.panel
+        exe, info = skill_agent.agent_status()
+        self.request = tk.StringVar()
+        app._label(p, f"{info}\n만든 결과는 먼저 보여 드리고, '설치'를 눌러야 스킬 폴더에 들어갑니다.", 10, fg=c["muted"], bg=c["bg"],
+                   anchor="w", justify="left", wraplength=app.px(self.W - 50)).pack(fill="x", pady=(0, 10))
+        app._label(p, "어떤 스킬이 필요한가요? (이 문장만 에이전트에 보냅니다)", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x")
+        row = tk.Frame(p, bg=c["bg"])
+        row.pack(fill="x", pady=(3, 0))
+        box, e = app._entry(row, self.request)
+        box.pack(side="left", fill="x", expand=True)
+        e.bind("<Return>", lambda ev: self.agent_start())
+        self.make_btn = app._button(row, "만들기", self.agent_start, primary=True)
+        self.make_btn.pack(side="left", padx=(8, 0))
+        self.status = app._label(p, "", 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=app.px(self.W - 50))
+        self.status.pack(fill="x", pady=(8, 3))
+        btns = tk.Frame(p, bg=c["bg"])
+        btns.pack(side="bottom", fill="x", pady=(10, 0))
+        self.install_btn = app._button(btns, "설치", self.agent_install, primary=True)
+        self.install_btn.pack(side="right")
+        self.cancel_btn = app._button(btns, "취소", lambda: self.cancel.set())
+        self.cancel_btn.pack(side="right", padx=8)
+        app._button(btns, "닫기", self.close).pack(side="right")
+        self._agent_checks()
+        self.files = app._label(p, "", 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=app.px(self.W - 50))
+        self.files.pack(side="bottom", fill="x", pady=(6, 0))
+        self.preview = tk.Text(p, wrap="word", relief="flat", bd=0, padx=12, pady=10, font=app.f(10), bg=c["surface"], fg=c["text"],
+                               selectbackground=c["soft"], selectforeground=c["text"], highlightthickness=1,
+                               highlightbackground=c["line"], height=10)
+        self.preview.pack(fill="both", expand=True)
+        self._agent_state()
+
+    def _agent_state(self) -> None:
+        """Fill the widgets from self.running / self.draft (the tab is rebuilt on every visit)."""
+        app, ready = self.app, bool(skill_agent.agent_status()[0]) and not self.running
+        app._enable(self.make_btn, ready)
+        app._enable(self.cancel_btn, self.running)
+        app._enable(self.install_btn, bool(self.draft) and not self.running)
+        self.preview.config(state="normal")
+        self.preview.delete("1.0", "end")
+        if self.draft:
+            self.preview.insert("1.0", self.draft.skill_md)
+            self.files.config(text=f"스킬 이름: {self.draft.name}\n파일{len(self.draft.files)}개: {', '.join(self.draft.files)}")
+        else:
+            self.files.config(text="")
+        self.preview.config(state="disabled")
+        if self.running:
+            self.say("에이전트가 스킬을 만드는 중입니다… (보통 1~2분, 최대 10분)")
+
+    def agent_start(self) -> None:
+        request = self.request.get().strip()
+        if self.running or not request:
+            self.say("어떤 스킬이 필요한지 적어 주세요", warn=True)
+            return
+        exe, info = skill_agent.agent_status()
+        if not exe:
+            self.say(info, warn=True)
+            return
+        if not messagebox.askokcancel(
+                "에이전트 실행", f"{skill_agent.SUPPORTED}를 실행해 스킬을 만듭니다.\n\n- 보내는 내용: 입력한 요청문뿐입니다.\n"
+                "- 임시 폴더에서만 파일을 쓰며, 설치는 결과를 본 뒤 직접 누릅니다.\n- 사용 중인 계정의 사용량이 쓰입니다.\n\n실행할까요?",
+                parent=self.win):
+            return
+        if self.draft:
+            skill_agent.discard(self.draft)
+            self.draft = None
+        self.cancel, self.running = threading.Event(), True
+        self._agent_state()
+        cancel = self.cancel
+        self.app.bg(lambda: skill_agent.generate(request, cancel), self._agent_done)
+
+    def _agent_done(self, res) -> None:
+        self.running = False
+        if not self.win.winfo_exists():
+            if isinstance(res, skill_agent.Draft):
+                skill_agent.discard(res)
+            return
+        if isinstance(res, skill_agent.Draft):
+            self.draft = res
+        if self.mode != "에이전트로 만들기":  # the user is on another tab; the result shows when they come back
+            return
+        self._agent_state()
+        if isinstance(res, skill_agent.Cancelled):
+            self.say("취소했습니다")
+        elif isinstance(res, Exception):
+            self.say(f"만들지 못했습니다: {res}", warn=True)
+        else:
+            self.say("만들었습니다. 아래 내용을 확인하고, 괜찮으면 '설치'를 누르세요.")
+
+    def agent_install(self) -> None:
+        agents = [a for a, v in self.agents.items() if v.get()]
+        if not self.draft or not agents:
+            self.say("설치할 에이전트를 하나 이상 선택하세요", warn=True)
+            return
+        draft = self.draft
+        self.app._enable(self.install_btn, False)
+        self.say("설치 중…")
+        self.app.bg(lambda: skill_agent.install_draft(draft, agents), self._agent_installed)
+
+    def _agent_installed(self, res) -> None:
+        if not isinstance(res, Exception):
+            self.draft = None  # install_draft already removed the temp folder
+        if not self.win.winfo_exists() or self.mode != "에이전트로 만들기":
+            return
+        if isinstance(res, Exception):
+            self.say(f"설치 실패: {res}", warn=True)
+            self._agent_state()
+            return
+        self._agent_state()
+        self.say(f"설치했습니다: {res[0]}")
+        self.app.say(f"스킬을 설치했습니다: {res[0].name}")
+        self.app.load()
+
+    # -- tab 4: recommended
     def _build_recommended(self) -> None:
         app, c, p = self.app, self.app.c, self.panel
         self.recommended = mgr.load_recommended()
