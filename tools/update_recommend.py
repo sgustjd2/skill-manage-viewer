@@ -25,7 +25,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "skill_recommend.json"
+OUT = Path(__file__).resolve().parent.parent / "src" / "skilldesk" / "data" / "skill_recommend.json"
 PAGES = {"popular": "https://www.skills.sh/", "trending": "https://www.skills.sh/trending"}
 USER_AGENT = "SkillDesk-recommend-updater/1.0 (+https://github.com/sgustjd2/skill-manage-viewer)"
 

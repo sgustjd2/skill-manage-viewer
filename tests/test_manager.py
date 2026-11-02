@@ -7,8 +7,8 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-import platform_support as plat
-import skill_manager as m
+from skilldesk import platform_support as plat
+from skilldesk import skill_manager as m
 
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
 

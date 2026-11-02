@@ -18,13 +18,13 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-import platform_support as plat  # noqa: E402
-import skill_agent  # noqa: E402
-import skill_harness as hn  # noqa: E402
-import skill_manager as mgr  # noqa: E402
-import skill_viewer as v  # noqa: E402
+from skilldesk import platform_support as plat  # noqa: E402
+from skilldesk import skill_agent  # noqa: E402
+from skilldesk import skill_harness as hn  # noqa: E402
+from skilldesk import skill_manager as mgr  # noqa: E402
+from skilldesk import skill_viewer as v  # noqa: E402
 
 OUT = ROOT / "docs" / "images"
 MANUAL = {"grill-me", "grill-with-docs", "improve-codebase-architecture", "theme-factory"}

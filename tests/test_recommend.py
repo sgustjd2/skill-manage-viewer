@@ -11,9 +11,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import skill_manager as mgr
+from skilldesk import skill_manager as mgr
 
-sys.path.insert(0, str(Path(__file__).parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import update_recommend as u  # noqa: E402  # pyright: ignore[reportMissingImports]
 
 # A cut-down skills.sh /trending page, in the form the real one has: the list sits inside a Next.js script as the

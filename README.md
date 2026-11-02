@@ -315,7 +315,7 @@ https://gitlab.example.com/group/repo/-/tree/dev/x    GitLab 링크도 같은 �
 
 ![추천 탭 (어두운 화면)](docs/images/add-recommended-dark.png)
 
-- 목록은 [skills.sh](https://www.skills.sh)가 공개 페이지에 보여 주는 순위를 **저장소에 담아 둔 스냅샷**(`skill_recommend.json`, 위쪽에 기준일 표시)입니다. 앱은 이 목록을 받으려고 인터넷에 나가지 않으며, 새 목록은 앱 업데이트로 들어옵니다(GitHub Actions가 매일 한국 시간 오전 7시쯤 갱신하며, 이 갱신만 있을 때는 앱을 다시 시작하라고 하지 않습니다). 만드는 법은 [개발 문서](docs/DEVELOPMENT.md)에 있습니다.
+- 목록은 [skills.sh](https://www.skills.sh)가 공개 페이지에 보여 주는 순위를 **저장소에 담아 둔 스냅샷**(`src/skilldesk/data/skill_recommend.json`, 위쪽에 기준일 표시)입니다. 앱은 이 목록을 받으려고 인터넷에 나가지 않으며, 새 목록은 앱 업데이트로 들어옵니다(GitHub Actions가 매일 한국 시간 오전 7시쯤 갱신하며, 이 갱신만 있을 때는 앱을 다시 시작하라고 하지 않습니다). 만드는 법은 [개발 문서](docs/DEVELOPMENT.md)에 있습니다.
 - GitHub 저장소의 스킬만 싣고, 한 저장소에서 2개까지, 같은 이름은 한 번만 보입니다. 설치 수가 많다고 좋거나 안전하다는 뜻은 아니니, 설치 전에 내용을 확인하세요.
 - **어제 급등**은 저장소의 GitHub 스타 수를 매일 기록해 어제와 비교한 증가량입니다. 스타는 저장소 단위라 줄은 저장소의 대표 스킬로 보이고, 누르면 그 저장소의 스킬을 불러옵니다. 기록을 시작한 첫날에는 비교할 값이 없어 "내일부터 표시"라고 안내하며, 증가가 10 미만인 저장소는 싣지 않습니다.
 - 파일이 없거나 깨져 있으면 "추천 목록이 비어 있습니다"라고 알려 줍니다.
@@ -486,7 +486,7 @@ Windows 11은 작업 표시줄 오른쪽 `^`를 눌러 숨은 아이콘을 보�
 그 스킬의 `SKILL.md`를 직접 고쳤다면 원본과 충돌한 것입니다. `~/.skill-manager/sources/<저장소>`에서 고친 내용을 정리한 뒤 다시 시도하세요.
 
 **글꼴이 Pretendard가 아니에요.**
-`fonts/` 폴더에 `Pretendard-Regular.otf`, `Pretendard-Bold.otf`가 있는지 확인하세요. 불러오지 못하면 Windows는 맑은 고딕, macOS는 Apple SD Gothic Neo로 보입니다.
+`src/skilldesk/assets/fonts/` 폴더에 `Pretendard-Regular.otf`, `Pretendard-Bold.otf`가 있는지 확인하세요. 불러오지 못하면 Windows는 맑은 고딕, macOS는 Apple SD Gothic Neo로 보입니다.
 
 ## 개발에 참여하기
 
@@ -495,4 +495,4 @@ Windows 11은 작업 표시줄 오른쪽 `^`를 눌러 숨은 아이콘을 보�
 
 ## 라이선스
 
-- 글꼴 [Pretendard](https://github.com/orioncactus/pretendard): SIL Open Font License 1.1 (`fonts/LICENSE.txt`)
+- 글꼴 [Pretendard](https://github.com/orioncactus/pretendard): SIL Open Font License 1.1 (`src/skilldesk/assets/fonts/LICENSE.txt`)

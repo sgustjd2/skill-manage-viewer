@@ -74,7 +74,7 @@ python -m pip install -r requirements.txt ruff pyright
 ```bash
 python -c "import tkinter, pystray, PIL; print('Tk', tkinter.TkVersion)"   # Tk 8.6 이 나와야 합니다
 python skill_viewer.py --check                                           # 이 PC의 스킬 탐색 결과
-python -m unittest test_manager test_viewer test_install test_update     # 모두 OK
+python -m unittest tests.test_manager tests.test_install tests.test_update   # 모두 OK
 ```
 
 ## 실행과 디버깅
@@ -84,7 +84,7 @@ python skill_viewer.py            # 콘솔에 오류가 그대로 보여 개발�
 pythonw skill_viewer.py           # Windows: 콘솔 없이 (실사용)
 python skill_viewer.py --hidden   # 트레이로만 시작
 python skill_viewer.py --check    # 창 없이 에이전트별 개수·카테고리·출처만 출력
-python skill_viewer.py --make-icon   # skill_viewer.ico 다시 만들기
+python skill_viewer.py --make-icon   # skill_viewer.ico 다시 만들기 (저장소 맨 위 실행 파일이 src/skilldesk로 넘겨 줍니다)
 python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들기
 ```
 
@@ -96,33 +96,42 @@ python skill_viewer.py --make-icns   # macOS 아이콘(skill_viewer.icns) 만들
 
 ```
 skill-manage-viewer/
-├─ skill_viewer.py          화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴
-├─ skill_manager.py         일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
-├─ skill_agent.py           에이전트(Claude Code)에게 스킬을 만들게 함: 임시 폴더에서 실행·시간 제한·취소, 결과 검사(Draft), 미리보기 뒤 설치 (Tk 없음)
-├─ skill_harness.py         프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
-├─ skill_usage.py           Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
-├─ platform_support.py      OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
-├─ install.py               시작 메뉴 바로 가기 / macOS .app 만들기·지우기
-├─ skill_update.py          앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기
-├─ skill_categories.json    카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
-├─ skill_notes.json         스킬별 한국어 한 줄 용도 (이름 → 설명)
-├─ skill_recommend.json     추천 탭에 보여 줄 skills.sh 인기·요즘 뜨는 목록, 어제 급등 목록, 날짜별 스타 수의 스냅샷 (tools/update_recommend.py가 만듦)
-├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 (앱은 쓰지 않음; 매일 .github/workflows/recommend.yml이 돌림)
-├─ skill_viewer.ico         앱 아이콘 (Windows)
-├─ fonts/                   Pretendard Regular·Bold + 라이선스
-├─ start.bat / start.command  더블클릭 실행 (Windows / macOS)
-├─ requirements.txt         실행에 필요한 패키지
-├─ test_manager.py          skill_manager 테스트
-├─ test_agent.py            skill_agent 테스트: 가짜 에이전트로 감지·미리보기 뒤 설치·임시 폴더·실패·시간 초과·취소
-├─ test_viewer.py           화면·플랫폼·카테고리·탐색 테스트
-├─ test_harness.py          skill_harness 테스트 (임시 폴더)
-├─ test_install.py          install.py 테스트
-├─ test_recommend.py        추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
+├─ src/skilldesk/           앱 본체(파이썬 패키지). 모듈끼리는 `from . import …`로 부릅니다
+│  ├─ skill_viewer.py       화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴. `main()`이 시작점
+│  ├─ skill_manager.py      일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
+│  ├─ skill_agent.py        에이전트(Claude Code)에게 스킬을 만들게 함: 임시 폴더에서 실행·시간 제한·취소, 결과 검사(Draft), 미리보기 뒤 설치 (Tk 없음)
+│  ├─ skill_harness.py      프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
+│  ├─ skill_usage.py        Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
+│  ├─ platform_support.py   OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
+│  ├─ install.py            시작 메뉴 바로 가기 / macOS .app 만들기·지우기
+│  ├─ skill_update.py       앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기
+│  ├─ __main__.py           `python -m skilldesk` (src를 경로에 넣었을 때)
+│  ├─ data/
+│  │  ├─ skill_categories.json  카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
+│  │  ├─ skill_notes.json       스킬별 한국어 한 줄 용도 (이름 → 설명)
+│  │  └─ skill_recommend.json   추천 탭에 보여 줄 skills.sh 인기·요즘 뜨는 목록, 어제 급등 목록, 날짜별 스타 수의 스냅샷 (tools/update_recommend.py가 만듦)
+│  └─ assets/fonts/         Pretendard Regular·Bold + 라이선스
+├─ tests/                   `test_*.py` 전부. `tests/__init__.py`가 `src/`를 경로에 넣습니다
+│  ├─ test_manager.py       skill_manager 테스트
+│  ├─ test_agent.py         skill_agent 테스트: 가짜 에이전트로 감지·미리보기 뒤 설치·임시 폴더·실패·시간 초과·취소
+│  ├─ test_viewer.py        화면·플랫폼·카테고리·탐색 테스트
+│  ├─ test_harness.py       skill_harness 테스트 (임시 폴더)
+│  ├─ test_install.py       install.py 테스트
+│  ├─ test_update.py        skill_update 테스트 (옛 폴더 구조의 설치가 새 구조로 업데이트되는 경우 포함)
+│  ├─ test_recommend.py     추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
+│  └─ test_usage.py · test_release.py · test_check.py · test_privacy.py   그 밖의 테스트
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 (앱은 쓰지 않음; 워크플로가 돌림)
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
 │  ├─ make_screenshots.py   README 스크린샷 다시 찍기
 │  └─ images/               README 스크린샷
-└─ .github/workflows/ci.yml Windows·macOS CI
+├─ .github/workflows/       ci.yml(Windows·macOS CI) · recommend.yml(매일 추천 목록) · release.yml(버전·릴리스)
+├─ skill_viewer.py          실행 파일(얇음): 시작 메뉴 바로 가기·macOS 앱·`start.*`·옛 설치의 자동 업데이트가 이 경로를 씁니다. 고치지 말고 위치도 옮기지 마세요
+├─ install.py               `python install.py`용 실행 파일(얇음). 본체는 `src/skilldesk/install.py`
+├─ skill_viewer.ico         앱 아이콘 (Windows). 이미 만든 바로 가기가 이 경로를 가리킵니다
+├─ start.bat / start.command  더블클릭 실행 (Windows / macOS)
+├─ VERSION · requirements.txt · pyrightconfig.json
+└─ README.md · AGENTS.md · CLAUDE.md
 ```
 
 ## 구조와 흐름
@@ -182,8 +191,8 @@ skill-manage-viewer/
 ```bash
 python tools/check.py                                        # 린트·타입·모든 테스트, 실패한 것만 출력 (푸시 전)
 python tools/check.py fast                                   # 창이 뜨지 않는 테스트만, 약 30초 (수정하는 동안)
-python -m unittest test_manager test_viewer test_install -v
-python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나만
+python -m unittest tests.test_manager tests.test_viewer tests.test_install -v
+python -m unittest tests.test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나만
 ```
 
 - 테스트는 **임시 폴더만** 씁니다. `mgr.STORE`, `mgr.AGENT_DIRS` 등을 바꿔 끼워서 실제 `~/.claude`, `~/.codex`, `~/.skill-manager`에는 쓰지 않습니다.
@@ -209,8 +218,8 @@ python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail -v   # 하나�
 
 ```bash
 python -m ruff check . --line-length 140 --select E,F,W,B,UP,SIM
-python -m ruff format --line-length 140 test_viewer.py test_manager.py test_install.py install.py
-python -m pyright skill_manager.py skill_viewer.py platform_support.py install.py
+python -m ruff format --line-length 140 tests/test_viewer.py tests/test_manager.py tests/test_install.py src/skilldesk/install.py
+python -m pyright src/skilldesk/skill_manager.py src/skilldesk/skill_viewer.py src/skilldesk/platform_support.py src/skilldesk/install.py   # 경로는 pyrightconfig.json
 ```
 
 - 한 줄은 140자까지입니다.
@@ -232,29 +241,29 @@ python -m pyright skill_manager.py skill_viewer.py platform_support.py install.p
 
 ### 스킬을 분류하거나 한국어 설명을 붙일 때
 
-1. `skill_categories.json`에서 맞는 카테고리의 `skills` 배열에 이름을 넣습니다. **한 곳에만** 넣으세요.
-2. `skill_notes.json`에 `"이름": "한 줄 용도"`를 넣습니다. 짧게, "무엇을 할 때 쓰는지"가 드러나게 씁니다.
-3. `python -m unittest test_viewer.CategoryTest`로 중복·누락을 확인합니다.
+1. `src/skilldesk/data/skill_categories.json`에서 맞는 카테고리의 `skills` 배열에 이름을 넣습니다. **한 곳에만** 넣으세요.
+2. `src/skilldesk/data/skill_notes.json`에 `"이름": "한 줄 용도"`를 넣습니다. 짧게, "무엇을 할 때 쓰는지"가 드러나게 씁니다.
+3. `python -m unittest tests.test_viewer.CategoryTest`로 중복·누락을 확인합니다.
 
 플러그인 스킬은 `superpowers:brainstorming`처럼 앞에 플러그인 이름이 붙어도 뒤의 이름(`brainstorming`)으로 찾습니다.
 
 ### 추천 목록을 새로 받을 때
 
-`python tools/update_recommend.py` (표준 라이브러리만 씁니다). skills.sh의 `/`와 `/trending`을 **한 번씩만** 받아 `skill_recommend.json`을 새로 씁니다. 앱은 이 파일만 읽고 네트워크를 쓰지 않습니다.
+`python tools/update_recommend.py` (표준 라이브러리만 씁니다). skills.sh의 `/`와 `/trending`을 **한 번씩만** 받아 `src/skilldesk/data/skill_recommend.json`을 새로 씁니다. 앱은 이 파일만 읽고 네트워크를 쓰지 않습니다.
 
 - 목록은 페이지에 실린 `initialSkills` JSON에서 읽습니다(화면 마크업이 아님). `/api/`·`/search`는 `robots.txt`가 막으므로 부르지 않습니다.
 - 거르는 기준은 스크립트 위쪽 상수입니다: GitHub `owner/repo`만, 저장소당 `PER_REPO`개, 같은 스킬 이름은 한 번, 설치 `MIN_INSTALLS` 이상, 목록당 `SIZE`개.
 - 받지 못했거나 페이지 형식이 바뀌어 `initialSkills`를 못 찾으면 **기존 파일을 그대로 두고** 종료 코드 1로 끝납니다. 이 경우 `parse_skills()`를 새 형식에 맞게 고치고 `test_recommend.py`의 예시를 갱신하세요.
 - **어제 급등**: 위 두 목록에 나온 저장소(최대 약 60개)의 GitHub 스타 수를 `https://api.github.com/repos/<owner>/<repo>`로 한 번씩 받아 `stars`에 날짜별로 쌓고(`KEEP_DAYS`일치만 보관), 가장 가까운 이전 날짜와의 차이를 `surge`에 씁니다(`MIN_GAIN` 이상, `SURGE_SIZE`개까지, `surge_since`는 비교한 날짜). 첫 실행은 비교 대상이 없어 `surge`가 비어 있고 앱이 "내일부터 표시"라고 안내합니다. 날짜는 한국 시간입니다.
 - `GITHUB_TOKEN` 환경변수가 있으면 API 호출에 쓰고(`GITHUB_TOKEN=$(gh auth token) python tools/update_recommend.py`), 없으면 비로그인(시간당 60회)으로 부릅니다. 저장소가 사라졌으면(404) 그 저장소만 빼고, 한도 초과·네트워크 오류면 기존 파일을 그대로 두고 종료 코드 1로 끝납니다.
-- **매일 자동 갱신**: `.github/workflows/recommend.yml`이 한국 시간 오전 7시(UTC 22:00)에 스크립트를 돌려, 바뀌면 `skill_recommend.json`만 `main`에 커밋합니다(공식 저장소에서만, `contents: write` 권한만, 수동 실행도 가능). 앱은 자동 업데이트로 받는데, 바뀐 파일이 `skill_recommend.json`뿐이면(`skill_update.DATA_FILES`) 재시작 안내 없이 적용하고 추천 탭은 열 때마다 파일을 다시 읽습니다.
+- **매일 자동 갱신**: `.github/workflows/recommend.yml`이 한국 시간 오전 7시(UTC 22:00)에 스크립트를 돌려, 바뀌면 `src/skilldesk/data/skill_recommend.json`만 `main`에 커밋합니다(공식 저장소에서만, `contents: write` 권한만, 수동 실행도 가능). 앱은 자동 업데이트로 받는데, 바뀐 파일이 `skill_recommend.json`뿐이면(`skill_update.DATA_FILES`) 재시작 안내 없이 적용하고 추천 탭은 열 때마다 파일을 다시 읽습니다.
 - 새 파일은 `git diff`로 눈으로 훑고 커밋합니다(설치 수는 품질·안전 보증이 아니라서, 이상한 저장소가 상위에 보이면 걸러내는 기준을 손봅니다).
 
 ### 카테고리를 새로 만들거나 바꿀 때
 
-1. `skill_categories.json`에 `{ "name", "about", "keywords", "skills" }`를 추가합니다. 배열 순서가 새 스킬 자동 분류의 우선순위입니다.
+1. `src/skilldesk/data/skill_categories.json`에 `{ "name", "about", "keywords", "skills" }`를 추가합니다. 배열 순서가 새 스킬 자동 분류의 우선순위입니다.
 2. `skill_viewer.py`의 `CAT_COLORS`에 같은 이름으로 색 4개(라이트 글씨, 라이트 배경, 다크 글씨, 다크 배경)를 추가합니다. 다른 카테고리와 겹치지 않는 색이어야 합니다.
-3. `python -m unittest test_viewer`: 색 중복, 대비, 카테고리 짝을 함께 확인합니다.
+3. `python -m unittest tests.test_viewer`: 색 중복, 대비, 카테고리 짝을 함께 확인합니다.
 4. README의 [카테고리 기준](../README.md#카테고리-기준) 표도 고칩니다.
 
 ### 색을 바꿀 때
@@ -324,7 +333,7 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 - 자동으로 `Chore: 버전 X.Y.Z 올림` 커밋을 만들고, `vX.Y.Z` 태그를 붙이고, GitHub 릴리스를 만듭니다. 릴리스 노트는 커밋 제목을 종류별로 모은 것입니다.
 - `VERSION`을 직접 올렸으면 그 번호를 그대로 릴리스합니다.
 - 처음 머지되는 날은 태그가 없으므로 `VERSION`(1.0.0)으로 첫 릴리스를 만듭니다.
-- 테스트: `python -m unittest test_release -v`
+- 테스트: `python -m unittest tests.test_release -v`
 
 ## 알려진 한계
 

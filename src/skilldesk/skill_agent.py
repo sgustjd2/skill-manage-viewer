@@ -17,8 +17,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import platform_support as plat
-import skill_manager as mgr
+from . import platform_support as plat
+from . import skill_manager as mgr
 
 SUPPORTED = "Claude Code"
 UNSUPPORTED = ("Codex", "Antigravity")  # no checked way to run them non-interactively yet

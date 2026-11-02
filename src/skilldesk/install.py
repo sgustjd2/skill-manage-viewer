@@ -18,9 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-import platform_support as plat
+from . import platform_support as plat
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[2]  # the repo folder: the entries point at its top-level skill_viewer.py
 APP_NAME = "SkillDesk"
 BUNDLE_ID = "io.github.sgustjd2.skill-manage-viewer"
 MARKER = "# created by skill-manage-viewer install.py"  # only bundles carrying this are ever removed
@@ -96,7 +96,7 @@ def install_mac(apps: Path, launch_agents: Path | None, startup: bool, python: P
     launcher = app / "Contents/MacOS/launcher"
     launcher.write_text(f'#!/bin/bash\n{MARKER}\ncd "{HERE}"\nexec "{python}" skill_viewer.py "$@"\n', encoding="utf-8")
     launcher.chmod(0o755)
-    from skill_viewer import make_icns
+    from .skill_viewer import make_icns
 
     make_icns(app / "Contents/Resources/AppIcon.icns")
     made = [app]

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import release  # noqa: E402  # pyright: ignore[reportMissingImports]
 
 

@@ -20,7 +20,7 @@ from functools import cache
 from pathlib import Path
 from urllib.parse import urlparse
 
-import platform_support as plat
+from . import platform_support as plat
 
 HOME = Path.home()
 STORE = HOME / ".skill-manager"
@@ -362,7 +362,7 @@ def save_setting(key: str, value: object) -> None:
     (STORE / "settings.json").write_text(json.dumps({**load_settings(), key: value}, indent=1), encoding="utf-8")
 
 
-RECOMMENDED = Path(__file__).parent / "skill_recommend.json"  # a snapshot of skills.sh, rebuilt by tools/update_recommend.py
+RECOMMENDED = Path(__file__).parent / "data" / "skill_recommend.json"  # a snapshot of skills.sh, rebuilt by tools/update_recommend.py
 _SOURCE = re.compile(r"[A-Za-z0-9-]+/[\w.-]+")  # owner/repo on GitHub
 
 

@@ -8,7 +8,7 @@ Lives in a window centered on the screen that is opened and closed from a tray i
   python  skill_viewer.py --make-icon  rewrite skill_viewer.ico
 
 Needs: pip install pystray pillow     (the file operations themselves live in skill_manager.py)
-Font: Pretendard is loaded from ./fonts/*.otf when present (private to this process); otherwise Malgun Gothic.
+Font: Pretendard is loaded from assets/fonts/*.otf when present (private to this process); otherwise Malgun Gothic.
 """
 
 import contextlib
@@ -27,21 +27,22 @@ from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import filedialog, messagebox, simpledialog
 
-import platform_support as plat
-import skill_agent
-import skill_harness as hn
-import skill_manager as mgr
-import skill_usage as usage
-import skill_update as upd
+from . import platform_support as plat
+from . import skill_agent
+from . import skill_harness as hn
+from . import skill_manager as mgr
+from . import skill_usage as usage
+from . import skill_update as upd
 
 HERE = Path(__file__).parent
+ROOT = HERE.parents[1]  # the repo folder: requirements.txt, the icon and the top-level skill_viewer.py launcher
 HOME = Path.home()
-NOTES = json.loads((HERE / "skill_notes.json").read_text(encoding="utf-8"))
+NOTES = json.loads((HERE / "data" / "skill_notes.json").read_text(encoding="utf-8"))
 
 # Categories are mutually exclusive: every known skill is listed under exactly one of them in
 # skill_categories.json (checked by tests). The keywords there only place skills that file doesn't list yet,
 # trying the categories in file order, the skill name before its description.
-CATALOG = json.loads((HERE / "skill_categories.json").read_text(encoding="utf-8"))
+CATALOG = json.loads((HERE / "data" / "skill_categories.json").read_text(encoding="utf-8"))
 CATEGORIES = [(c["name"], c["keywords"]) for c in CATALOG]
 CATEGORY_OF = {skill: c["name"] for c in CATALOG for skill in c["skills"]}
 OTHER = "기타"
@@ -226,8 +227,8 @@ def check() -> None:
 
 # ---- windows helpers ---------------------------------------------------------------------------
 def load_bundled_fonts() -> int:
-    """Make ./fonts/*.otf|ttf usable by this process only (nothing is installed system-wide)."""
-    return sum(plat.register_font(p) for p in sorted((HERE / "fonts").glob("*.[ot]tf")))
+    """Make assets/fonts/*.otf|ttf usable by this process only (nothing is installed system-wide)."""
+    return sum(plat.register_font(p) for p in sorted((HERE / "assets" / "fonts").glob("*.[ot]tf")))
 
 
 def icon_image(size: int = 256):
@@ -1252,7 +1253,7 @@ class App:
         if plat.MAC:
             # pystray must own the main thread on macOS and Tk needs it too, so the menu-bar icon lives in its own
             # process and reports clicks as one command per line.
-            self.tray_proc = subprocess.Popen([sys.executable, str(HERE / "skill_viewer.py"), "--tray-child"],
+            self.tray_proc = subprocess.Popen([sys.executable, str(ROOT / "skill_viewer.py"), "--tray-child"],
                                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             threading.Thread(target=self._read_tray, daemon=True).start()
             return
@@ -2438,7 +2439,7 @@ def startup_error_text(e: BaseException) -> str:
             f"필요한 모듈 '{e.name.split('.')[0]}'을(를) 찾을 수 없어 시작하지 못했습니다.\n\n"
             "Claude 앱 안이 아닌 일반 터미널(PowerShell)에서 아래를 실행한 뒤 다시 시작하세요. "
             "앱 안의 터미널로 설치하면 그 앱만 볼 수 있는 폴더에 설치됩니다.\n\n"
-            f'python -m pip install -r "{HERE / "requirements.txt"}"'
+            f'python -m pip install -r "{ROOT / "requirements.txt"}"'
         )
     return f"시작하지 못했습니다.\n\n{type(e).__name__}: {e}\n\n자세한 내용: {mgr.STORE / 'error.log'}"
 
@@ -2456,15 +2457,15 @@ def report_startup_failure(e: BaseException) -> None:
     root.destroy()
 
 
-if __name__ == "__main__":
+def main() -> None:
     if "--tray-child" in sys.argv:
         tray_child()
     elif "--check" in sys.argv:
         check()
     elif "--make-icon" in sys.argv:
-        make_ico(HERE / "skill_viewer.ico")
+        make_ico(ROOT / "skill_viewer.ico")
     elif "--make-icns" in sys.argv:
-        make_icns(HERE / "skill_viewer.icns")
+        make_icns(ROOT / "skill_viewer.icns")
     elif not plat.already_running():
         try:
             App().run(hidden="--hidden" in sys.argv)

@@ -22,13 +22,13 @@ from unittest import mock
 
 from PIL import ImageGrab
 
-import install
-import platform_support as plat
-import skill_agent
-import skill_harness as hn
-import skill_manager as mgr
-import skill_update as upd
-import skill_viewer as v
+from skilldesk import install
+from skilldesk import platform_support as plat
+from skilldesk import skill_agent
+from skilldesk import skill_harness as hn
+from skilldesk import skill_manager as mgr
+from skilldesk import skill_update as upd
+from skilldesk import skill_viewer as v
 
 SHOTS = Path(tempfile.gettempdir())
 
@@ -63,6 +63,9 @@ def usage_line(tid: str, skill: str, when) -> str:
 
 def find(app: v.App, agent: str, name: str) -> dict | None:
     return next((s for s in app.data[agent] if s["name"] == name), None)
+
+
+SRC_PATH = "import sys; sys.path.insert(0, 'src'); from skilldesk import "  # for `python -c` children run from the repo folder
 
 
 class PanelTest(unittest.TestCase):
@@ -1192,7 +1195,7 @@ class PanelTest(unittest.TestCase):
         dlg.close()
 
     def test_13_bundled_pretendard_is_used(self):
-        fonts = Path(v.__file__).parent / "fonts"
+        fonts = Path(v.__file__).parent / "assets" / "fonts"
         self.assertTrue((fonts / "Pretendard-Regular.otf").is_file() and (fonts / "Pretendard-Bold.otf").is_file())
         self.assertTrue((fonts / "LICENSE.txt").is_file())  # OFL: the license travels with the font files
         app = self.app
@@ -1404,10 +1407,10 @@ class PlatformTest(unittest.TestCase):
         name = f"skill-catalog-test-{os.getpid()}"
         self.assertFalse(plat.already_running(name))
         other = subprocess.run(
-            ["python", "-c", f"import platform_support as p; print(p.already_running({name!r}))"],
+            ["python", "-c", f"{SRC_PATH}platform_support as p\nprint(p.already_running({name!r}))"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent,
+            cwd=Path(__file__).resolve().parent.parent,
         )
         self.assertEqual(other.stdout.strip(), "True")
 
@@ -1597,10 +1600,10 @@ class DiscoveryTest(unittest.TestCase):
 
     def test_agent_homes_follow_env_vars(self):
         out = subprocess.run(
-            ["python", "-c", "import skill_manager as m; print(m.AGENT_DIRS['Claude Code']); print(m.AGENT_DIRS['Codex'])"],
+            ["python", "-c", f"{SRC_PATH}skill_manager as m\nprint(m.AGENT_DIRS['Claude Code']); print(m.AGENT_DIRS['Codex'])"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent,
+            cwd=Path(__file__).resolve().parent.parent,
             env={**os.environ, "CLAUDE_CONFIG_DIR": "D:/cc", "CODEX_HOME": "D:/cx"},
         ).stdout.split()
         self.assertEqual([Path(x) for x in out], [Path("D:/cc/skills"), Path("D:/cx/skills")])
