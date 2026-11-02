@@ -452,6 +452,34 @@ class PanelTest(unittest.TestCase):
         self.assertIsNone(app.cat)
         app.set_agent("Claude Code")
 
+    def test_03h_plugin_entry_lists_plugins_and_a_row_jumps_to_their_skills(self):
+        app = self.app
+        app.set_agent("Claude Code")
+        app.query.set("")
+        old = app.plugins
+        app.plugins = [{"name": "pack", "key": "pack@mk", "version": "1.0", "enabled": True, "path": self.tmp / "pack", "skills": 3},
+                       {"name": "idle", "key": "idle@mk", "version": "2", "enabled": False, "path": self.tmp / "idle", "skills": 0}]
+        try:
+            app.pick(v.PLUGINS)
+            app.root.update()
+            texts = [w.cget("text") for w in walk(app.body) if isinstance(w, tk.Label)]
+            for want in ("pack", "idle", "v1.0", "스킬 3개", "켜짐", "꺼짐"):
+                self.assertIn(want, texts)
+            self.assertIn("2개 플러그인", app.count.cget("text"))
+            app.query.set("idl")
+            self.assertEqual([p["name"] for p in app.shown], ["idle"])  # the search box narrows the plugins
+            app.query.set("")
+            app.show_plugin_skills("pack")
+            self.assertEqual((app.cat, app.query.get()), (None, "pack:"))
+            self.assertEqual(app.shown, [])  # no skill of that plugin on this clean machine; the point is the switch to skills
+            self.assertIn("스킬", app.count.cget("text"))
+            app.set_agent("Codex")
+            self.assertNotIn(v.PLUGINS, [w.cget("text") for w in walk(app.rail) if isinstance(w, tk.Label)])  # Claude Code only
+        finally:
+            app.plugins = old
+            app.query.set("")
+            app.set_agent("Claude Code")
+
     def test_03i_idle_skills_are_ticked_then_deleted_together(self):
         app, claude = self.app, self.tmp / "claude"
         app.set_agent("Claude Code")
@@ -473,12 +501,14 @@ class PanelTest(unittest.TestCase):
                 self.settle(lambda: app.usage is not None)
                 app.root.update()
                 # tdd and gitskill were called this month; stale-new was installed this month, so it is left out (for now)
-                self.assertEqual([s["name"] for s in app.shown], ["grilling", "stale-a", "stale-b", "stale-link"])
-                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "4"])
+                # grilling (app-synced, never called) cannot be deleted here: it is not a candidate at all
+                self.assertTrue(any(not s["managed"] and s["name"] == "grilling" for s in app.data["Claude Code"]))
+                self.assertEqual([s["name"] for s in app.shown], ["stale-a", "stale-b", "stale-link"])
+                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "3"])
                 self.assertEqual(app.idle_bar.winfo_manager(), "pack")
                 body = texts(app.body)
-                self.assertEqual(body.count("기록 없음"), 4)
-                self.assertIn("앱 동기화 제공 스킬이라 여기서 삭제할 수 없습니다", body)  # view-only: no tick box, only the reason
+                self.assertEqual(body.count("기록 없음"), 3)
+                self.assertFalse(any("삭제할 수 없습니다" in t for t in body))
                 self.assertEqual(set(app.checks), {"stale-a", "stale-b", "stale-link"})
                 self.assertTrue(any(t.startswith("대화 기록이") and "부터만 남아" in t for t in body))  # the test logs are minutes old
                 app.log_start = datetime(2020, 1, 1)  # logs that reach back past the window: no note
@@ -508,7 +538,7 @@ class PanelTest(unittest.TestCase):
                 app.query.set("")
                 self.assertEqual(app.checks["stale-a"][-1].cget("text"), "☑")  # and it is ticked again when it comes back
                 app.select_all()
-                self.assertEqual(app.checked, {"stale-a", "stale-b", "stale-link"})  # not the view-only one
+                self.assertEqual(app.checked, {"stale-a", "stale-b", "stale-link"})
                 app.clear_checks()
                 self.assertEqual(texts(app.idle_bar)[0], "지울 스킬의 ☐를 눌러 체크하세요")
                 app.toggle_theme()
@@ -536,8 +566,8 @@ class PanelTest(unittest.TestCase):
                 self.assertTrue((self.tmp / "src/stale-link/SKILL.md").exists())  # the original stays
                 self.assertTrue(any("stale-a" in p.name for p in (mgr.STORE / "trash").iterdir()))
                 self.assertEqual(app.checked, set())
-                self.assertEqual([s["name"] for s in app.shown], ["grilling", "stale-b"])
-                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "2"])
+                self.assertEqual([s["name"] for s in app.shown], ["stale-b"])
+                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "1"])
                 self.assertIn("삭제됨: 2개", app.footer.cget("text"))
 
                 saved = app.usage  # without any skill call in the logs every skill looks idle: no list, and the reason
@@ -681,7 +711,7 @@ class PanelTest(unittest.TestCase):
         app = self.app
         try:
             with mock.patch.object(v.uc, "applies", return_value=True), mock.patch.object(upd, "apply") as git_update:
-                with mock.patch.object(v.uc, "newer_release", return_value="9.9.9") as newer:
+                with mock.patch.object(v.uc, "release_state", return_value=("newer", "9.9.9")) as newer:
                     app.auto_update()
                     self.settle(lambda: app.new_release)
                     git_update.assert_not_called()  # no second notice from the git updater
@@ -699,13 +729,20 @@ class PanelTest(unittest.TestCase):
                         app.root.update()
                         opened.assert_called_once_with("https://github.com/sgustjd2/skill-manage-viewer/releases/tag/v9.9.9")
                 app.footer.config(text="")
-                with mock.patch.object(v.uc, "newer_release", return_value=None):
-                    app.auto_update()  # automatic and nothing newer (or offline): silent
+                with mock.patch.object(v.uc, "release_state", return_value=("latest", None)):
+                    app.auto_update()  # automatic and nothing newer: silent
                     app.root.update()
                     app.auto_update(manual=True)
                     self.settle(lambda: "최신 버전" in app.footer.cget("text"))
+                app.footer.config(text="")
+                with mock.patch.object(v.uc, "release_state", return_value=("failed", None)):
+                    app.auto_update()  # offline, automatic: silent
+                    app.root.update()
+                    self.assertEqual(app.footer.cget("text"), "")
+                    app.auto_update(manual=True)  # offline, asked for: says so
+                    self.settle(lambda: "확인하지 못했습니다" in app.footer.cget("text"))
                 mgr.save_setting("auto_update", False)
-                with mock.patch.object(v.uc, "newer_release") as off:
+                with mock.patch.object(v.uc, "release_state") as off:
                     app.auto_update()
                     app.root.update()
                     off.assert_not_called()  # switched off in the settings: no request at all
@@ -1314,6 +1351,30 @@ class PanelTest(unittest.TestCase):
         self.assertIn("aaa → bbb", info.call_args[0][1])
         self.assertEqual(app.updatable, set())
 
+    def test_08b_update_button_also_checks_skilldesk_when_git_cannot_update_it(self):
+        app = self.app
+        with (
+            mock.patch.object(mgr, "has_update", return_value=False),
+            mock.patch.object(v.uc, "applies", return_value=True),
+            mock.patch.object(v.uc, "release_state", return_value=("newer", "9.9.9")),
+        ):
+            app.check_updates()
+            self.settle(lambda: "9.9.9" in app.footer.cget("text"))
+            self.assertEqual(app.new_release, "9.9.9")
+        with (
+            mock.patch.object(mgr, "has_update", return_value=False),
+            mock.patch.object(v.uc, "applies", return_value=False),
+            mock.patch.object(v.uc, "release_state") as asked,
+        ):
+            app.check_updates()  # a git clone has its own updater: no second question
+            self.settle(lambda: "최신" in app.footer.cget("text"))
+            asked.assert_not_called()
+        app.new_release = None
+        if app.release_pill:
+            app.release_pill.destroy()
+            app.release_pill = None
+        app.footer.config(text=v.DEFAULT_HINT)
+
     def test_09_update_check_marks_rows_and_survives_decline(self):
         app = self.app
         with (
@@ -1410,6 +1471,12 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, app.root, app.theme)
             app.pick(sorted({s["cat"] for s in app.shown})[0])  # a selected rail row
             bad += low_contrast(app, app.root, app.theme + " picked")
+            app.plugins = [{"name": n, "key": n, "version": "1", "enabled": on, "path": self.tmp / n, "skills": 1}
+                           for n, on in (("pa", True), ("pb", False))]
+            app.pick(v.PLUGINS)
+            bad += low_contrast(app, app.root, app.theme + " plugins")
+            app.plugins = []
+            app.pick(None)
             for w in walk(app.root):  # hover states: header buttons, rows, rail
                 if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
                     w.event_generate("<Enter>")
@@ -1453,6 +1520,9 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, hw.win, app.theme + " harness, new set")
             hw.show_page("구조 가이드")
             bad += low_contrast(app, hw.win, app.theme + " harness, guide")
+            dd = v.DefaultsWindow(hw)
+            bad += low_contrast(app, dd.win, app.theme + " harness, defaults")
+            dd.win.destroy()
             hw.show_page("세트 편집")
             for w in walk(hw.win):
                 if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
@@ -1529,6 +1599,48 @@ class PanelTest(unittest.TestCase):
             w.delete_set()
         self.assertNotIn("web", hn.load()["sets"])
         w.close()
+        mgr.remove("Claude Code", "harness-demo")
+        app.load()
+
+    def test_16_harness_window_loads_project_skills_and_creates_the_default_setup(self):
+        claude = mgr.AGENT_DIRS["Claude Code"]
+        write_skill(claude / "harness-demo")
+        proj = self.tmp / "harness-init"
+        (proj / ".claude/skills").mkdir(parents=True)
+        write_skill(proj / ".claude/skills/harness-demo")
+        write_skill(proj / ".claude/skills/hand-made")  # not installed anywhere else
+        (proj / "CLAUDE.md").write_text("mine", encoding="utf-8")
+        key = hn.add_project(proj)
+        app = self.app
+        app.load()
+        app.harness_dialog()
+        w = app.dialog
+        w.select_project(key)
+        w.load_project_skills()  # the project's own skills show up ticked, the missing one flagged
+        self.assertEqual({n for n, var in w.skill_vars.items() if var.get()}, {"harness-demo", "hand-made"})
+        w.name_var.set("from-project")
+        w.save_set()
+        self.assertCountEqual(hn.load()["sets"]["from-project"]["skills"], ["hand-made", "harness-demo"])
+        w.show_page("구조 가이드")
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=False):
+            w.init_defaults()  # cancelled: nothing is made
+        self.assertFalse((proj / "AGENTS.md").exists())
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.init_defaults()
+        self.assertEqual((proj / "CLAUDE.md").read_text(encoding="utf-8"), "mine")  # never overwritten
+        self.assertTrue((proj / "AGENTS.md").is_file() and (proj / ".claude/settings.json").is_file())
+        self.assertIn("AGENTS.md", w.status.cget("text"))
+        dlg = v.DefaultsWindow(w)
+        dlg.choose(".mcp.json")
+        dlg.text.delete("1.0", "end")
+        dlg.text.insert("1.0", "{nope")
+        dlg.save()
+        self.assertEqual(hn.load()["defaults"], {})  # invalid JSON is refused, nothing saved
+        dlg.win.destroy()
+        w.close()
+        for p in (proj / ".claude/skills").iterdir():
+            if mgr.is_link(p):
+                plat.unlink_dir(p)
         mgr.remove("Claude Code", "harness-demo")
         app.load()
 
