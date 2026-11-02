@@ -1398,6 +1398,9 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, hw.win, app.theme + " harness, new set")
             hw.show_page("구조 가이드")
             bad += low_contrast(app, hw.win, app.theme + " harness, guide")
+            dd = v.DefaultsWindow(hw)
+            bad += low_contrast(app, dd.win, app.theme + " harness, defaults")
+            dd.win.destroy()
             hw.show_page("세트 편집")
             for w in walk(hw.win):
                 if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
@@ -1474,6 +1477,48 @@ class PanelTest(unittest.TestCase):
             w.delete_set()
         self.assertNotIn("web", hn.load()["sets"])
         w.close()
+        mgr.remove("Claude Code", "harness-demo")
+        app.load()
+
+    def test_16_harness_window_loads_project_skills_and_creates_the_default_setup(self):
+        claude = mgr.AGENT_DIRS["Claude Code"]
+        write_skill(claude / "harness-demo")
+        proj = self.tmp / "harness-init"
+        (proj / ".claude/skills").mkdir(parents=True)
+        write_skill(proj / ".claude/skills/harness-demo")
+        write_skill(proj / ".claude/skills/hand-made")  # not installed anywhere else
+        (proj / "CLAUDE.md").write_text("mine", encoding="utf-8")
+        key = hn.add_project(proj)
+        app = self.app
+        app.load()
+        app.harness_dialog()
+        w = app.dialog
+        w.select_project(key)
+        w.load_project_skills()  # the project's own skills show up ticked, the missing one flagged
+        self.assertEqual({n for n, var in w.skill_vars.items() if var.get()}, {"harness-demo", "hand-made"})
+        w.name_var.set("from-project")
+        w.save_set()
+        self.assertCountEqual(hn.load()["sets"]["from-project"]["skills"], ["hand-made", "harness-demo"])
+        w.show_page("구조 가이드")
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=False):
+            w.init_defaults()  # cancelled: nothing is made
+        self.assertFalse((proj / "AGENTS.md").exists())
+        with mock.patch.object(v.messagebox, "askokcancel", return_value=True):
+            w.init_defaults()
+        self.assertEqual((proj / "CLAUDE.md").read_text(encoding="utf-8"), "mine")  # never overwritten
+        self.assertTrue((proj / "AGENTS.md").is_file() and (proj / ".claude/settings.json").is_file())
+        self.assertIn("AGENTS.md", w.status.cget("text"))
+        dlg = v.DefaultsWindow(w)
+        dlg.choose(".mcp.json")
+        dlg.text.delete("1.0", "end")
+        dlg.text.insert("1.0", "{nope")
+        dlg.save()
+        self.assertEqual(hn.load()["defaults"], {})  # invalid JSON is refused, nothing saved
+        dlg.win.destroy()
+        w.close()
+        for p in (proj / ".claude/skills").iterdir():
+            if mgr.is_link(p):
+                plat.unlink_dir(p)
         mgr.remove("Claude Code", "harness-demo")
         app.load()
 
