@@ -930,12 +930,27 @@ class PanelTest(unittest.TestCase):
 
     def test_05_edit_note(self):
         app = self.app
-        with mock.patch.object(v.simpledialog, "askstring", return_value="내가 쓴 설명"):
-            app.edit_note(find(app, "Codex", "legacy"))
+        app.edit_note(find(app, "Codex", "legacy"))
+        app.root.update()
+        d = app.dialog
+        self.assertIsInstance(d, v.NoteDialog)
+        self.assertGreaterEqual(d.win.winfo_height(), 300)  # roomy, not the tiny system box
+        d.text.delete("1.0", "end")
+        d.text.insert("1.0", "내가 쓴\n설명")
+        d.save()
+        self.assertFalse(d.win.winfo_exists())
         self.assertEqual(find(app, "Codex", "legacy")["note"], "내가 쓴 설명")
-        with mock.patch.object(v.simpledialog, "askstring", return_value=""):
-            app.edit_note(find(app, "Codex", "legacy"))
+        app.edit_note(find(app, "Codex", "legacy"))
+        app.root.update()
+        self.assertEqual(app.dialog.text.get("1.0", "end").strip(), "내가 쓴 설명")
+        app.dialog.text.delete("1.0", "end")
+        app.dialog.save()
         self.assertNotEqual(find(app, "Codex", "legacy")["note"], "내가 쓴 설명")
+        app.edit_note(find(app, "Codex", "legacy"))  # Esc closes without saving
+        app.root.update()
+        app.dialog.win.event_generate("<Escape>")
+        app.root.update()
+        self.assertFalse(app.dialog.win.winfo_exists())
 
     # ---- add: create / link ----------------------------------------------------------------
     def test_06_add_dialog_create(self):

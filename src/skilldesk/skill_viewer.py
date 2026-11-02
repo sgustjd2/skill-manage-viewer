@@ -26,7 +26,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from tkinter import font as tkfont
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
 
 from . import platform_support as plat
 from . import skill_agent
@@ -355,7 +355,7 @@ class App:
         self.events: queue.Queue = queue.Queue()
         self.tray = None
         self.tray_proc: subprocess.Popen | None = None
-        self.dialog: AddDialog | SettingsDialog | HarnessWindow | None = None
+        self.dialog: AddDialog | SettingsDialog | HarnessWindow | NoteDialog | None = None
         self.detail_win: DetailDialog | None = None
         self.popup: Popup | None = None
         self._last_toggle = 0.0
@@ -1038,13 +1038,9 @@ class App:
         return win
 
     def edit_note(self, s: dict) -> None:
-        cur = brief(s["name"], s["desc"], mgr.load_notes())
-        text = simpledialog.askstring("용도 설명 수정", f"{s['name']}\n한 줄 설명 (비우면 기본 설명으로 되돌림)",
-                                      initialvalue=cur, parent=self.root)
-        if text is None:
-            return
-        mgr.set_note(s["name"], text)
-        self.load()
+        if self.dialog and self.dialog.win.winfo_exists():
+            self.dialog.close()  # one side dialog at a time
+        self.dialog = NoteDialog(self, s)
 
     def edit_file(self, s: dict) -> None:
         if s["repo"] and not messagebox.askokcancel(
@@ -1761,6 +1757,41 @@ class SettingsDialog:
 
     def close(self) -> None:
         self.win.destroy()
+
+
+class NoteDialog:
+    """Edit a skill's one-line purpose note. Empty = back to the default description. Ctrl+Enter saves, Esc closes."""
+    W, H = 520, 340
+
+    def __init__(self, app: App, s: dict):
+        self.app, self.name, c = app, s["name"], app.c
+        self.win = win = app._side_window("용도 설명 수정", self.W, self.H)
+        win.protocol("WM_DELETE_WINDOW", self.close)
+        win.bind("<Escape>", lambda e: self.close())
+        win.bind("<Control-Return>", lambda e: self.save())
+        app._label(win, self.name, 13, bold=True, bg=c["bg"]).pack(anchor="w", padx=18, pady=(18, 2))
+        app._label(win, "이 스킬이 무엇에 쓰이는지 적어 두세요. 비우고 저장하면 기본 설명으로 되돌아갑니다.", 10,
+                   fg=c["muted"], bg=c["bg"], wraplength=app.px(self.W - 40), justify="left").pack(anchor="w", padx=18)
+        btns = tk.Frame(win, bg=c["bg"])
+        btns.pack(side="bottom", fill="x", padx=18, pady=(0, 16))
+        app._button(btns, "저장", self.save, primary=True).pack(side="right")
+        app._button(btns, "취소", self.close).pack(side="right", padx=8)
+        self.text = tk.Text(win, font=app.f(11), bg=c["surface"], fg=c["text"], insertbackground=c["text"], relief="flat",
+                            wrap="word", highlightthickness=1, highlightbackground=c["line"], highlightcolor=c["accent"],
+                            padx=12, pady=10)
+        self.text.pack(fill="both", expand=True, padx=18, pady=(12, 12))
+        self.text.insert("1.0", brief(self.name, s["desc"], mgr.load_notes()))
+        self.text.focus_set()
+        self.text.tag_add("sel", "1.0", "end-1c")
+
+    def save(self) -> None:
+        mgr.set_note(self.name, " ".join(self.text.get("1.0", "end").split()))  # a note is one line: fold line breaks
+        self.close()
+        self.app.load()
+
+    def close(self) -> None:
+        if self.win.winfo_exists():
+            self.win.destroy()
 
 
 class HarnessWindow:
