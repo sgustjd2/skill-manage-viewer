@@ -32,9 +32,12 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("### 기타\n- 문서 (`d4`)\n- 그냥 메시지 (`e5`)", text)
         self.assertNotIn("버전 1.3.0", text)
         self.assertIn("[v1.2.3과 비교](https://github.com/sgustjd2/skill-manage-viewer/compare/v1.2.3...v1.3.0)", text)
+        self.assertIn("git clone https://github.com/sgustjd2/skill-manage-viewer.git", text)  # every release says how to install
 
     def test_the_first_release_has_no_list(self):
-        self.assertIn("처음으로 버전을 붙인", release.notes_md("1.0.0", None, []))
+        text = release.notes_md("1.0.0", None, [])
+        self.assertIn("처음으로 버전을 붙인", text)
+        self.assertIn(".\\start.bat", text)
 
     def test_a_feature_bumps_once_and_nothing_new_releases_nothing(self):
         with tempfile.TemporaryDirectory() as t:

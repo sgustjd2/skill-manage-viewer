@@ -1,6 +1,7 @@
 # SkillDesk
 
 [![CI](https://github.com/sgustjd2/skill-manage-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/sgustjd2/skill-manage-viewer/actions/workflows/ci.yml)
+[![최신 릴리스](https://img.shields.io/github/v/release/sgustjd2/skill-manage-viewer?label=%EC%B5%9C%EC%8B%A0%20%EB%A6%B4%EB%A6%AC%EC%8A%A4)](https://github.com/sgustjd2/skill-manage-viewer/releases/latest)
 
 내 PC에 설치된 **AI 에이전트 스킬**(Claude Code · Codex · Antigravity)을 한 화면에서 보고, 설치·업데이트·수정·삭제까지 하는 **Windows·macOS** 프로그램입니다.
 작은 창이 화면 모서리에 떠 있고, 트레이(macOS는 메뉴 막대) 아이콘으로 열고 닫습니다.

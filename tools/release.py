@@ -19,6 +19,33 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "sgustjd2/skill-manage-viewer")
 SUBJECT = re.compile(r"^(Feat|Fix|Refactor|Style|Docs|Test|Chore)\s*:\s*(.+)$")
 BUMP_COMMIT = re.compile(r"^Chore: 버전 ")  # our own version commit: never listed in the notes
 SECTIONS = {"Feat": "새 기능", "Fix": "고친 것", "Refactor": "정리", "Style": "화면", "기타": "기타"}
+INSTALL = """
+---
+
+### 설치
+
+Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README](https://github.com/{repo}#빠른-시작-5분)를 보세요.
+
+**Windows**
+
+```
+git clone https://github.com/{repo}.git
+cd skill-manage-viewer
+.\\start.bat
+python install.py
+```
+
+**macOS**
+
+```
+git clone https://github.com/{repo}.git
+cd skill-manage-viewer
+./start.command
+python3 install.py
+```
+
+`git clone`으로 받아야 새 버전을 자동으로 받습니다. 소스 ZIP으로 받은 설치는 자동 업데이트가 되지 않습니다.
+"""
 
 
 def git(*args: str) -> str:
@@ -56,7 +83,8 @@ def bump(version: str, kind: str) -> str:
 
 def notes_md(version: str, prev: str | None, items: list[tuple[str, str]]) -> str:
     if prev is None:
-        return f"## v{version}\n\n처음으로 버전을 붙인 릴리스입니다. 이전 변경은 커밋 기록에서 볼 수 있습니다.\n"
+        intro = f"## v{version}\n\n처음으로 버전을 붙인 릴리스입니다. 이전 변경은 커밋 기록에서 볼 수 있습니다.\n"
+        return intro + INSTALL.format(repo=REPO)
     groups: dict[str, list[str]] = {}
     for short, subject in items:
         if BUMP_COMMIT.match(subject):
@@ -69,7 +97,7 @@ def notes_md(version: str, prev: str | None, items: list[tuple[str, str]]) -> st
         if groups.get(kind):
             lines += [f"### {title}", *groups[kind], ""]
     lines.append(f"[{prev}과 비교](https://github.com/{REPO}/compare/{prev}...v{version})")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" + INSTALL.format(repo=REPO)
 
 
 def main(argv: list[str]) -> int:
