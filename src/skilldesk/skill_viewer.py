@@ -219,6 +219,8 @@ def load_pins() -> dict[str, set[str]]:
 
 
 def check() -> None:
+    if hasattr(sys.stdout, "reconfigure"):  # a console code page without Hangul (cp1252) must not make the start-up check fail
+        sys.stdout.reconfigure(errors="replace")  # pyright: ignore[reportAttributeAccessIssue]
     assert uc.current_version(), "VERSION is missing"
     for a in AGENTS:
         skills = collect(a)
