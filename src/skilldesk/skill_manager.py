@@ -362,6 +362,33 @@ def save_setting(key: str, value: object) -> None:
     (STORE / "settings.json").write_text(json.dumps({**load_settings(), key: value}, indent=1), encoding="utf-8")
 
 
+def list_plugins() -> list[dict]:
+    """Claude Code plugins in plugins/installed_plugins.json, by name: {name, key, version, enabled, path, skills}.
+    Empty if the file is missing or malformed; a malformed entry is skipped."""
+    try:
+        installed = json.loads((CLAUDE_HOME / "plugins/installed_plugins.json").read_text(encoding="utf-8"))["plugins"]
+    except (OSError, KeyError, ValueError, TypeError):
+        return []
+    try:
+        enabled = json.loads((CLAUDE_HOME / "settings.json").read_text(encoding="utf-8")).get("enabledPlugins", {})
+    except (OSError, ValueError, AttributeError):
+        enabled = {}
+    if not isinstance(installed, dict):
+        return []
+    if not isinstance(enabled, dict):
+        enabled = {}
+    out = []
+    for key, entries in installed.items():
+        try:
+            path = Path(entries[0]["installPath"])
+            skills = sum(1 for _ in (path / "skills").rglob("SKILL.md"))
+            out.append({"name": key.split("@")[0], "key": key, "version": str(entries[0].get("version") or "?"),
+                        "enabled": bool(enabled.get(key)), "path": path, "skills": skills})
+        except (KeyError, IndexError, TypeError, AttributeError, OSError):
+            continue
+    return sorted(out, key=lambda p: p["name"].lower())
+
+
 RECOMMENDED = Path(__file__).parent / "data" / "skill_recommend.json"  # a snapshot of skills.sh, rebuilt by tools/update_recommend.py
 _SOURCE = re.compile(r"[A-Za-z0-9-]+/[\w.-]+")  # owner/repo on GitHub
 

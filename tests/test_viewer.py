@@ -452,6 +452,34 @@ class PanelTest(unittest.TestCase):
         self.assertIsNone(app.cat)
         app.set_agent("Claude Code")
 
+    def test_03h_plugin_entry_lists_plugins_and_a_row_jumps_to_their_skills(self):
+        app = self.app
+        app.set_agent("Claude Code")
+        app.query.set("")
+        old = app.plugins
+        app.plugins = [{"name": "pack", "key": "pack@mk", "version": "1.0", "enabled": True, "path": self.tmp / "pack", "skills": 3},
+                       {"name": "idle", "key": "idle@mk", "version": "2", "enabled": False, "path": self.tmp / "idle", "skills": 0}]
+        try:
+            app.pick(v.PLUGINS)
+            app.root.update()
+            texts = [w.cget("text") for w in walk(app.body) if isinstance(w, tk.Label)]
+            for want in ("pack", "idle", "v1.0", "스킬 3개", "켜짐", "꺼짐"):
+                self.assertIn(want, texts)
+            self.assertIn("2개 플러그인", app.count.cget("text"))
+            app.query.set("idl")
+            self.assertEqual([p["name"] for p in app.shown], ["idle"])  # the search box narrows the plugins
+            app.query.set("")
+            app.show_plugin_skills("pack")
+            self.assertEqual((app.cat, app.query.get()), (None, "pack:"))
+            self.assertEqual(app.shown, [])  # no skill of that plugin on this clean machine; the point is the switch to skills
+            self.assertIn("스킬", app.count.cget("text"))
+            app.set_agent("Codex")
+            self.assertNotIn(v.PLUGINS, [w.cget("text") for w in walk(app.rail) if isinstance(w, tk.Label)])  # Claude Code only
+        finally:
+            app.plugins = old
+            app.query.set("")
+            app.set_agent("Claude Code")
+
     def test_03i_idle_skills_are_ticked_then_deleted_together(self):
         app, claude = self.app, self.tmp / "claude"
         app.set_agent("Claude Code")
@@ -1290,6 +1318,12 @@ class PanelTest(unittest.TestCase):
             bad += low_contrast(app, app.root, app.theme)
             app.pick(sorted({s["cat"] for s in app.shown})[0])  # a selected rail row
             bad += low_contrast(app, app.root, app.theme + " picked")
+            app.plugins = [{"name": n, "key": n, "version": "1", "enabled": on, "path": self.tmp / n, "skills": 1}
+                           for n, on in (("pa", True), ("pb", False))]
+            app.pick(v.PLUGINS)
+            bad += low_contrast(app, app.root, app.theme + " plugins")
+            app.plugins = []
+            app.pick(None)
             for w in walk(app.root):  # hover states: header buttons, rows, rail
                 if isinstance(w, tk.Label) and str(w.cget("cursor")) == "hand2":
                     w.event_generate("<Enter>")

@@ -1,11 +1,13 @@
 """python -m unittest test_manager -v   (needs git; works in a temp dir, never touches the real ~/.claude etc.)"""
 
+import json
 import os
 import subprocess
 import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 from skilldesk import platform_support as plat
 from skilldesk import skill_manager as m
@@ -49,6 +51,45 @@ class ParseLink(unittest.TestCase):
         ):
             with self.assertRaises(m.ManagerError, msg=bad):
                 m.parse_link(bad)
+
+
+class ListPlugins(unittest.TestCase):
+    def home(self, installed: str | None, settings: str | None = None) -> Path:
+        t = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (t / "plugins").mkdir()
+        for rel, text in (("plugins/installed_plugins.json", installed), ("settings.json", settings)):
+            if text is not None:
+                (t / rel).write_text(text, encoding="utf-8")
+        return t
+
+    def read(self, home: Path) -> list[dict]:
+        with mock.patch.object(m, "CLAUDE_HOME", home):
+            return m.list_plugins()
+
+    def test_reads_version_enabled_and_skill_count(self):
+        t = self.home("", '{"enabledPlugins": {"on@mk": true}}')
+        for name, n in (("on", 2), ("off", 0)):
+            for i in range(n):
+                (t / name / "skills" / f"s{i}").mkdir(parents=True)
+                (t / name / "skills" / f"s{i}" / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+        (t / "off").mkdir(exist_ok=True)
+        entry = lambda p, v: [{"installPath": str(t / p), "version": v}]  # noqa: E731
+        (t / "plugins/installed_plugins.json").write_text(
+            json.dumps({"plugins": {"on@mk": entry("on", "1.2.0"), "off@mk": entry("off", "0.1"), "bad@mk": []}}), encoding="utf-8")
+        got = self.read(t)
+        self.assertEqual([(p["name"], p["version"], p["enabled"], p["skills"]) for p in got],
+                         [("off", "0.1", False, 0), ("on", "1.2.0", True, 2)])  # the malformed entry is skipped
+        self.assertEqual(got[1]["path"], t / "on")
+
+    def test_missing_or_broken_files_give_an_empty_list(self):
+        self.assertEqual(self.read(self.home(None)), [])
+        self.assertEqual(self.read(self.home("{not json")), [])
+        self.assertEqual(self.read(self.home('{"plugins": [1]}')), [])
+        self.assertEqual(self.read(self.home("[]")), [])
+
+    def test_broken_settings_only_means_nothing_is_enabled(self):
+        t = self.home('{"plugins": {"p@mk": [{"installPath": "x", "version": "1"}]}}', "{broken")
+        self.assertEqual([p["enabled"] for p in self.read(t)], [False])
 
 
 class InstalledOn(unittest.TestCase):
