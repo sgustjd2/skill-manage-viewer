@@ -1807,6 +1807,7 @@ class HarnessWindow:
         self.project: str | None = None
         self.set_name: str | None = None
         self.creating = False  # "＋ 새 세트" was clicked: an empty set waiting for a name
+        self.pending: set[str] | None = None  # skills read from the project folder, shown ticked until a set is saved
         self.name_var = tk.StringVar()
         self.skill_vars: dict[str, tk.BooleanVar] = {}
         self.target_vars: dict[str, tk.BooleanVar] = {}
@@ -1924,8 +1925,11 @@ class HarnessWindow:
         box, self.name_entry = app._entry(name_row, self.name_var)
         box.pack(side="left", fill="x", expand=True)
 
-        app._label(self.right, "이 세트에 넣을 스킬 (설치된 스킬 중에서)", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(fill="x")
-        saved = set(self.data["sets"].get(self.set_name or "", {}).get("skills", []))
+        pick = tk.Frame(self.right, bg=c["bg"])
+        pick.pack(fill="x")
+        app._label(pick, "이 세트에 넣을 스킬 (설치된 스킬 중에서)", 10, fg=c["muted"], bg=c["bg"], anchor="w").pack(side="left")
+        app._button(pick, "프로젝트 스킬 불러오기", self.load_project_skills).pack(side="right", pady=(0, 2))
+        saved = set(self.pending if self.pending is not None else self.data["sets"].get(self.set_name or "", {}).get("skills", []))
         installed = sorted({s["path"].name for skills in app.data.values() for s in skills if s["managed"]}, key=str.lower)
         self.skill_vars = {n: tk.BooleanVar(value=n in saved) for n in installed}
         self.skill_vars |= {n: tk.BooleanVar(value=True) for n in sorted(saved - set(installed))}  # in the set, no longer installed
@@ -1966,7 +1970,9 @@ class HarnessWindow:
             self.say("이 프로젝트 폴더를 찾을 수 없습니다. 옮기거나 지웠다면 '제거'로 목록에서 빼세요.", warn=True)
             return
         on = hn.applied(self.project)
-        self.say("연결된 스킬: " + ", ".join(on) if on else "아직 이 프로젝트에 연결된 스킬이 없습니다.")
+        own = [n for n in hn.project_skills(self.project) if n not in on]
+        parts = ([f"연결된 스킬: {', '.join(on)}"] if on else []) + ([f"프로젝트에 직접 둔 스킬: {', '.join(own)}"] if own else [])
+        self.say(" · ".join(parts) or "아직 이 프로젝트에 연결된 스킬이 없습니다.")
 
     def show_page(self, name: str) -> None:
         self.page = name
@@ -1987,8 +1993,8 @@ class HarnessWindow:
         steps = ["1. 왼쪽 '＋ 폴더 추가'로 프로젝트 폴더를 등록합니다.",
                  "2. 세트 편집에서 이 프로젝트에 쓸 스킬을 골라 세트로 저장합니다.",
                  "3. '이 프로젝트에 적용'을 누르면 아래 트리의 skills 폴더에 연결이 만들어집니다. '연결 해제'로 되돌립니다.",
-                 "4. CLAUDE.md · AGENTS.md · .mcp.json · settings.json은 프로젝트에서 직접 작성합니다. "
-                 "이 앱은 아직 만들거나 고치지 않고, 있는지만 보여 줍니다."]
+                 "4. 아래 '기본 세팅 만들기'를 누르면 CLAUDE.md · AGENTS.md · .mcp.json · settings.json 중 없는 것만 기본 틀로 만듭니다. "
+                 "이미 있는 파일은 건드리지 않습니다. 내용은 '기본 세팅 편집…'에서 내 것으로 바꿔 둘 수 있습니다."]
         box = tk.Frame(self.guide_page, bg=c["bg"])
         box.pack(fill="both", expand=True, padx=20, pady=(14, 0))
         app._label(box, "하네스 만드는 순서", 11, bold=True, bg=c["bg"], anchor="w").pack(fill="x", pady=(0, 4))
@@ -1999,6 +2005,10 @@ class HarnessWindow:
             app._label(box, "\n프로젝트를 등록하면 그 폴더의 구조가 여기에 트리로 나옵니다.", 10, fg=c["muted"], bg=c["bg"],
                        anchor="w").pack(fill="x")
             return
+        row = tk.Frame(box, bg=c["bg"])
+        row.pack(side="bottom", fill="x", pady=(0, 8))  # before the tree, so a short window shrinks the tree
+        app._button(row, "기본 세팅 만들기…", self.init_defaults, primary=True).pack(side="left")
+        app._button(row, "기본 세팅 편집…", self.edit_defaults).pack(side="left", padx=(8, 0))
         app._label(box, "프로젝트 구조", 11, bold=True, bg=c["bg"], anchor="w").pack(fill="x", pady=(14, 4))
         mono = (plat.MONO_FONT, round(10 * plat.FONT_SCALE), "normal", "roman")
         text = tk.Text(box, font=mono, bg=c["surface"], fg=c["text"], relief="flat", highlightthickness=1,
@@ -2024,11 +2034,11 @@ class HarnessWindow:
 
     # ---- choices --------------------------------------------------------------------------------
     def select_project(self, path: str) -> None:
-        self.project, self.set_name, self.creating = path, None, False
+        self.project, self.set_name, self.creating, self.pending = path, None, False, None
         self.refresh()
 
     def choose_set(self, name: str | None) -> None:
-        self.set_name, self.creating = name, name is None
+        self.set_name, self.creating, self.pending = name, name is None, None
         if name is not None:
             self.persist()
         self.refresh()
@@ -2080,6 +2090,51 @@ class HarnessWindow:
         if self.project:
             plat.open_folder(Path(self.project))
 
+    # ---- default setup --------------------------------------------------------------------------
+    def load_project_skills(self) -> None:
+        """Tick the skills the project folder already has (linked or put there by hand), ready to save as a set."""
+        if not self.project:
+            return self.say("프로젝트를 먼저 추가하세요.", warn=True)
+        names = hn.project_skills(self.project)
+        if not names:
+            return self.say("이 프로젝트 폴더(.claude/skills, .agents/skills)에 스킬이 없습니다.", warn=True)
+        typed, self.pending = self.name_var.get(), set(names)
+        self.refresh()
+        self.name_var.set(typed)
+        self.say(f"프로젝트 폴더의 스킬 {len(names)}개를 체크했습니다. 이름을 적고 '세트 저장'을 누르면 세트가 됩니다.")
+
+    def init_defaults(self) -> None:
+        """Create the default files the project lacks (never overwriting), and link the chosen set if there is one."""
+        if not self.project:
+            return self.say("프로젝트를 먼저 추가하세요.", warn=True)
+        missing = hn.missing_defaults(self.project)
+        skills = self.data["sets"][self.set_name]["skills"] if self.set_name in self.data["sets"] else []
+        if not missing and not skills:
+            return self.say("이미 기본 세팅이 모두 있습니다. 만들 것이 없습니다.")
+        lines = ["만들 파일: " + (", ".join(missing) or "없음 (모두 이미 있습니다)")]
+        if skills:
+            places = ", ".join(f"{hn.PROJECT_DIRS[t]}/" for t in self.targets())
+            lines.append(f"'{self.set_name}' 세트의 스킬 {len(skills)}개를 {places} 에 연결")
+        if not messagebox.askokcancel("기본 세팅 만들기", "\n".join(lines) + "\n\n이미 있는 파일과 폴더는 건드리지 않습니다.",
+                                      parent=self.win):
+            return
+        made = self.run(hn.init_project, self.project)
+        if made is None:
+            return
+        names = [r.name for r in made if r.status == "created"]
+        text, warn = ("새로 만든 파일: " + ", ".join(names) if names else "새로 만든 파일이 없습니다."), False
+        if skills:
+            self.persist()
+            if (out := self.run(hn.apply, self.project, self.exclude_var.get())) is not None:
+                line, warn = summarize(out)
+                text += " · " + line
+        self.refresh()
+        self.draw_guide()
+        self.say(text, warn)
+
+    def edit_defaults(self) -> None:
+        DefaultsWindow(self)
+
     # ---- sets -----------------------------------------------------------------------------------
     def save_set(self) -> str | None:
         """Save the ticked skills under the typed name and make it this project's set. -> the name, or None."""
@@ -2092,7 +2147,7 @@ class HarnessWindow:
         except mgr.ManagerError as e:
             messagebox.showerror("프로젝트 하네스", str(e), parent=self.win)
             return None
-        self.set_name, self.creating = name, False
+        self.set_name, self.creating, self.pending = name, False, None
         self.persist()
         self.refresh()
         self.say(f"'{name}' 세트를 저장했습니다.")
@@ -2142,6 +2197,73 @@ class HarnessWindow:
 
 def ellipsis(text: str, n: int) -> str:
     return text if len(text) <= n else "…" + text[-(n - 1):]
+
+
+class DefaultsWindow:
+    """Edit the content of the default files ('기본 세팅 만들기' writes these into a project). Saved in harness.json."""
+    W, H = 640, 520
+
+    def __init__(self, parent: HarnessWindow):
+        self.app = parent.app
+        app, c = self.app, self.app.c
+        self.win = win = app._side_window("기본 세팅 편집", self.W, self.H)
+        win.transient(parent.win)
+        win.bind("<Escape>", lambda e: win.destroy())
+        self.files = hn.default_files()
+        self.current = next(iter(self.files))
+        app._label(win, "기본 세팅 편집", 14, bold=True, bg=c["bg"], anchor="w", padx=20).pack(fill="x", pady=(14, 0))
+        app._label(win, "프로젝트에 없는 파일을 만들 때 쓰는 내용입니다. 이미 있는 파일에는 영향이 없습니다.", 10, fg=c["muted"],
+                   bg=c["bg"], anchor="w", padx=20).pack(fill="x", pady=(0, 8))
+        bottom = tk.Frame(win, bg=c["bg"])
+        bottom.pack(side="bottom", fill="x", padx=20, pady=(8, 14))
+        app._button(bottom, "저장", self.save, primary=True).pack(side="right")
+        app._button(bottom, "닫기", win.destroy).pack(side="right", padx=(0, 8))
+        app._button(bottom, "앱 기본값으로", self.reset).pack(side="left")
+        self.note = app._label(win, "", 10, fg=c["muted"], bg=c["bg"], anchor="w", padx=20)
+        self.note.pack(side="bottom", fill="x")
+        chips = tk.Frame(win, bg=c["bg"])
+        chips.pack(fill="x", padx=20, pady=(0, 6))
+        self.chips = {}
+        for rel in self.files:
+            chip = app._label(chips, rel, 10, padx=10, pady=3, cursor="hand2")
+            chip.pack(side="left", padx=(0, 6))
+            chip.bind("<Button-1>", lambda e, r=rel: self.choose(r))
+            self.chips[rel] = chip
+        self.text = DetailDialog._text_box(self, win, height=14, mono=True)  # type: ignore[arg-type]  # the skill editor's box
+        self.text.frame.pack(fill="both", expand=True, padx=20)  # type: ignore[attr-defined]
+        self.text.insert("1.0", self.files[self.current])
+        self.paint()
+
+    def paint(self) -> None:
+        c = self.app.c
+        for r, chip in self.chips.items():
+            on = r == self.current
+            chip.config(bg=c["accent"] if on else c["rail"], fg=c["on_accent"] if on else c["text"])
+
+    def choose(self, rel: str) -> None:
+        self.files[self.current] = self.text.get("1.0", "end-1c")
+        self.current = rel
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", self.files[rel])
+        self.text.edit_reset()
+        self.paint()
+
+    def say(self, text: str, warn: bool = False) -> None:
+        self.note.config(text=text, fg=self.app.c["warn_fg"] if warn else self.app.c["muted"])
+
+    def save(self) -> None:
+        self.files[self.current] = self.text.get("1.0", "end-1c")
+        try:
+            hn.save_defaults(self.files)
+        except mgr.ManagerError as e:
+            return self.say(str(e), warn=True)
+        self.say("저장했습니다. 다음 '기본 세팅 만들기'부터 이 내용을 씁니다.")
+
+    def reset(self) -> None:
+        self.files = dict(hn.DEFAULT_FILES)
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", self.files[self.current])
+        self.say("앱 기본값을 불러왔습니다. 저장해야 적용됩니다.")
 
 
 def summarize(results: list, release: bool = False) -> tuple[str, bool]:

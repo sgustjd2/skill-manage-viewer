@@ -54,6 +54,37 @@ class HarnessTest(unittest.TestCase):
         h.save_set("web", ["alpha", "alpha", "gamma"])  # same name replaces; duplicates collapse
         self.assertEqual(h.load()["sets"]["web"]["skills"], ["alpha", "gamma"])
 
+    def test_init_project_creates_only_what_is_missing_and_never_overwrites(self):
+        (self.proj / "CLAUDE.md").write_text("mine", encoding="utf-8")
+        self.assertEqual(h.missing_defaults(self.proj), ["AGENTS.md", ".mcp.json", ".claude/settings.json"])
+        out = {r.name: r.status for r in h.init_project(self.proj)}
+        self.assertEqual(out, {"CLAUDE.md": "exists", "AGENTS.md": "created", ".mcp.json": "created", ".claude/settings.json": "created"})
+        self.assertEqual((self.proj / "CLAUDE.md").read_text(encoding="utf-8"), "mine")
+        json.loads((self.proj / ".mcp.json").read_text(encoding="utf-8"))
+        (self.proj / "AGENTS.md").write_text("edited", encoding="utf-8")
+        self.assertEqual({r.status for r in h.init_project(self.proj)}, {"exists"})  # a second run changes nothing
+        self.assertEqual((self.proj / "AGENTS.md").read_text(encoding="utf-8"), "edited")
+        self.assertEqual(h.missing_defaults(self.proj), [])
+
+    def test_saved_defaults_replace_the_apps_start_and_must_be_valid_json(self):
+        files = h.default_files()
+        files["AGENTS.md"] = "# my rules\n"
+        h.save_defaults(files)
+        self.assertEqual(h.load()["defaults"], {"AGENTS.md": "# my rules\n"})  # only what differs is stored
+        h.init_project(self.proj)
+        self.assertEqual((self.proj / "AGENTS.md").read_text(encoding="utf-8"), "# my rules\n")
+        with self.assertRaises(mgr.ManagerError):
+            h.save_defaults({**files, ".mcp.json": "{nope"})
+        self.assertEqual(h.load()["defaults"], {"AGENTS.md": "# my rules\n"})  # the refused save changed nothing
+
+    def test_project_skills_lists_links_and_own_folders_in_both_places(self):
+        self.assertEqual(h.project_skills(self.proj), [])
+        h.apply(self.key)  # alpha, beta linked into .claude/skills
+        write_skill(self.proj / ".claude/skills/own")
+        write_skill(self.proj / ".agents/skills/beta")
+        (self.proj / ".claude/skills/not-a-skill").mkdir()
+        self.assertEqual(h.project_skills(self.proj), ["alpha", "beta", "own"])
+
     def test_unknown_keys_of_a_set_survive_a_save(self):
         f = mgr.STORE / "harness.json"
         f.write_text(json.dumps({"version": 9, "sets": {"x": {"skills": ["alpha"], "files": ["CLAUDE.md"]}}}), encoding="utf-8")
