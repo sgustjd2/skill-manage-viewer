@@ -345,7 +345,7 @@ done
 new="$3.update-new"
 old="$3.update-old"
 rm -rf "$new" "$old"
-if ditto "$2" "$new" && mv "$3" "$old" && mv "$new" "$3"; then
+if [ -d "$2/Contents" ] && ditto "$2" "$new" && [ -d "$new/Contents" ] && mv "$3" "$old" && mv "$new" "$3"; then
   rm -rf "$old"
   log "replaced $3"
 else

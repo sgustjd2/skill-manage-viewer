@@ -391,10 +391,10 @@ class MacScriptTest(unittest.TestCase):
             d.mkdir()
         old = apps / "SkillDesk.app"
         if make_old:
-            old.mkdir()
+            (old / "Contents").mkdir(parents=True)
             (old / "version").write_text("old")
         if new_exists:
-            new.mkdir()
+            (new / "Contents").mkdir(parents=True)
             (new / "version").write_text("new")
         opened = tmp / "opened.txt"
         (bin_ / "open").write_text(f'#!/bin/sh\necho "$@" >> "{opened}"\n')
