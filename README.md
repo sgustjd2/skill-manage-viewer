@@ -44,9 +44,9 @@
 
 ## 빠른 시작 (5분)
 
-### exe 설치 (권장, Windows)
+설치 방법은 세 가지입니다. **Windows 설치 파일 / macOS 설치 파일 / 소스로 설치**. 설치 파일은 Python도 Git도 필요 없습니다.
 
-Python도 Git도 필요 없습니다.
+### Windows 설치 파일 (권장)
 
 1. [최신 릴리스](https://github.com/sgustjd2/skill-manage-viewer/releases/latest)의 **Assets**에서 `SkillDesk-Setup-vX.Y.Z.exe`를 받아 실행합니다.
 2. 설치가 끝나면 시작 메뉴에서 `SkillDesk`로 켤 수 있습니다. 관리자 권한은 필요 없고 내 계정 폴더에 설치됩니다. 제거는 Windows `설정 → 앱`에서 합니다.
@@ -56,9 +56,25 @@ Python도 Git도 필요 없습니다.
 >
 > 링크로 스킬을 설치·업데이트하는 기능은 PC에 Git이 있어야 동작합니다([Git 설치](#3-git-설치-링크-설치업데이트를-쓸-때)). 나머지 기능은 Git 없이 됩니다.
 
-### 소스로 설치 (macOS, 또는 직접 받고 싶을 때)
+### macOS 설치 파일
 
-macOS는 설치 파일이 없어 이 방법을 씁니다. Python 3.12 이상과 Git이 필요합니다. 없다면 [자세한 설치 방법](#자세한-설치-방법)부터 보세요.
+Apple 칩(M1 이후) Mac용입니다. **Intel Mac용 설치 파일은 없으니** 아래 [소스로 설치](#소스로-설치-intel-mac-또는-직접-받고-싶을-때)를 쓰세요.
+
+1. [최신 릴리스](https://github.com/sgustjd2/skill-manage-viewer/releases/latest)의 **Assets**에서 `SkillDesk-vX.Y.Z-macOS-arm64.dmg`를 받아 엽니다.
+2. 열린 창에서 **SkillDesk를 Applications 폴더로 끌어다 놓습니다.** Launchpad나 Spotlight(`⌘ + Space`)에서 `SkillDesk`로 켤 수 있고, 켜면 화면 맨 위 메뉴 막대에 아이콘이 생깁니다.
+3. 새 버전이 나오면 Windows와 같이 **새 버전 vX.Y.Z · 받기** 알림이 뜹니다. 누르면 릴리스 페이지가 열리니 새 dmg를 받아 같은 방법으로 덮어 넣으세요. 앱이 스스로 내려받거나 바꾸지는 않습니다. 제거는 Applications의 SkillDesk를 휴지통으로 옮깁니다.
+
+> ⚠ 이 앱은 **Apple 개발자 서명과 공증을 하지 않았습니다.** (임시 서명만 해 둬서 "손상되었습니다" 대신 "확인되지 않은 개발자" 경고가 뜹니다.) 처음 열 때 한 번 허용해야 합니다.
+>
+> - macOS 14 이하: Finder에서 SkillDesk를 **우클릭 → 열기 → 열기**.
+> - macOS 15 이상: 한 번 열어 본 뒤 **시스템 설정 → 개인정보 보호 및 보안**을 열어 아래쪽의 **그래도 열기**를 누릅니다.
+> - 그래도 안 열리면 터미널에서 `xattr -dr com.apple.quarantine /Applications/SkillDesk.app`을 실행한 뒤 다시 여세요.
+>
+> 이 설치 파일은 CI에서 만들어 시험했지만, 개발자가 실제 Mac에서 설치해 본 것은 아닙니다. 열리지 않거나 메뉴 막대 아이콘이 안 보이면 [이슈](https://github.com/sgustjd2/skill-manage-viewer/issues)로 알려 주세요. 링크로 스킬을 설치하는 기능은 Windows와 같이 Git이 필요합니다.
+
+### 소스로 설치 (Intel Mac, 또는 직접 받고 싶을 때)
+
+Intel Mac이라 macOS 설치 파일을 쓸 수 없거나, 설치 파일 대신 직접 받고 싶을 때 쓰는 방법입니다. Python 3.12 이상과 Git이 필요합니다. 없다면 [자세한 설치 방법](#자세한-설치-방법)부터 보세요.
 
 **Windows** (명령 프롬프트 또는 PowerShell)
 
@@ -155,7 +171,7 @@ python install.py --uninstall   # 위에서 만든 것 지우기 (이 스크립�
 
 ### 7. 업데이트와 제거
 
-- **exe로 설치했다면** 새 버전 알림(위쪽 `새 버전 · 받기`)을 누르고, 받은 설치 파일을 실행하면 됩니다. 제거는 Windows `설정 → 앱`에서 합니다. 아래는 모두 소스로 설치한 경우입니다.
+- **설치 파일(Windows exe · macOS dmg)로 설치했다면** 새 버전 알림(위쪽 `새 버전 · 받기`)을 누르고, 받은 설치 파일을 실행하면 됩니다. 제거는 Windows는 `설정 → 앱`, macOS는 Applications의 SkillDesk를 휴지통으로 옮깁니다. 아래는 모두 소스로 설치한 경우입니다.
 - **프로그램 업데이트는 자동입니다.** 실행 중이면 켤 때와 6시간마다 새 버전이 있는지 확인해 알아서 받습니다. 자세한 규칙은 [자동 업데이트](#자동-업데이트)를 보세요.
   - 직접 하려면 프로그램 폴더에서 `git pull` 후 다시 실행해도 됩니다.
 - **완전히 제거**
@@ -165,7 +181,7 @@ python install.py --uninstall   # 위에서 만든 것 지우기 (이 스크립�
 
 ## 자동 업데이트
 
-**exe로 설치한 경우**에는 스스로 바꾸지 않고 **알려 주기만** 합니다. 앱을 켠 지 15초 뒤와 6시간마다 GitHub의 최신 릴리스 번호만 읽어(로그인 없이 1회) 지금보다 높으면 위쪽에 `새 버전 vX.Y.Z · 받기`가 뜹니다. 누르면 릴리스 페이지를 브라우저로 엽니다. 인터넷이 안 되거나 GitHub이 답하지 않으면 조용히 넘어가고, 이유는 `~/.skill-manager/update-check.log`에 한 줄 남습니다. 끄려면 `⚙ 설정`의 `새 버전이 나왔는지 확인하기`(또는 트레이 메뉴의 `SkillDesk 자동 업데이트 켜기/끄기`)를 해제하세요. 소스 ZIP으로 받은 폴더도 같은 알림을 씁니다.
+**설치 파일(Windows exe · macOS dmg)로 설치한 경우**에는 스스로 바꾸지 않고 **알려 주기만** 합니다. 앱을 켠 지 15초 뒤와 6시간마다 GitHub의 최신 릴리스 번호만 읽어(로그인 없이 1회) 지금보다 높으면 위쪽에 `새 버전 vX.Y.Z · 받기`가 뜹니다. 누르면 릴리스 페이지를 브라우저로 엽니다. 인터넷이 안 되거나 GitHub이 답하지 않으면 조용히 넘어가고, 이유는 `~/.skill-manager/update-check.log`에 한 줄 남습니다. 끄려면 `⚙ 설정`의 `새 버전이 나왔는지 확인하기`(또는 트레이 메뉴의 `SkillDesk 자동 업데이트 켜기/끄기`)를 해제하세요. 소스 ZIP으로 받은 폴더도 같은 알림을 씁니다.
 
 아래는 `git clone`으로 받은 설치의 자동 업데이트입니다.
 
@@ -489,6 +505,9 @@ Windows 11은 작업 표시줄 오른쪽 `^`를 눌러 숨은 아이콘을 보�
 
 **macOS에서 창이 비어 있거나 깨져 보여요.**
 `/usr/bin/python3`(Tk 8.5)로 실행한 경우입니다. python.org 설치본이나 Homebrew `python-tk`로 실행하세요.
+
+**macOS 설치 파일(dmg)로 받은 앱이 안 열려요.**
+위 [macOS 설치 파일](#macos-설치-파일)의 경고 안내대로 허용하세요. 열린 뒤 메뉴 막대에 아이콘이 없으면 `~/.skill-manager/error.log`가 있는지 보고 이슈로 알려 주세요. Intel Mac은 이 앱을 쓸 수 없으니 소스로 설치하세요.
 
 **macOS에서 `start.command`가 안 열려요.**
 처음 한 번은 Finder에서 **우클릭 → 열기**를 누르세요. 그래도 안 되면 터미널에서 `chmod +x start.command`.

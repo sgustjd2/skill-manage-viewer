@@ -34,8 +34,9 @@
 | 스킬 추가 대화상자(링크 설치·새로 만들기) | `skill_viewer.py` – `AddDialog` |
 | 스킬 목록 읽기, 출처·카테고리·한국어 설명 | `skill_viewer.py` – `collect`, `describe_origin`, `categorize`, `brief` |
 | 링크 해석, git 받기, 설치·업데이트·삭제·생성 | `skill_manager.py` |
-| 앱 자신의 업데이트 (git 클론: 자동 / exe·ZIP: 새 버전 알림만) | `skill_update.py` / `update_check.py` |
+| 앱 자신의 업데이트 (git 클론: 자동 / exe·dmg·ZIP: 새 버전 알림만) | `skill_update.py` / `update_check.py` |
 | Windows 설치 파일(exe) 빌드 | `tools/build_exe.py`, `tools/skilldesk.iss`, `release.yml`의 `exe` 작업 |
+| macOS 앱(.app을 담은 dmg) 빌드, 릴리스 공개 | `tools/build_mac.py`, `release.yml`의 `mac`·`publish` 작업 |
 | 프로젝트별 스킬 세트(저장·적용·해제·구조 트리), 그 창 | `skill_harness.py`, `skill_viewer.py` – `HarnessWindow` |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
 | 카테고리 정의, 스킬별 한국어 설명 | `data/skill_categories.json`, `data/skill_notes.json` |
