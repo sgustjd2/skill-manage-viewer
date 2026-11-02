@@ -473,12 +473,14 @@ class PanelTest(unittest.TestCase):
                 self.settle(lambda: app.usage is not None)
                 app.root.update()
                 # tdd and gitskill were called this month; stale-new was installed this month, so it is left out (for now)
-                self.assertEqual([s["name"] for s in app.shown], ["grilling", "stale-a", "stale-b", "stale-link"])
-                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "4"])
+                # grilling (app-synced, never called) cannot be deleted here: it is not a candidate at all
+                self.assertTrue(any(not s["managed"] and s["name"] == "grilling" for s in app.data["Claude Code"]))
+                self.assertEqual([s["name"] for s in app.shown], ["stale-a", "stale-b", "stale-link"])
+                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "3"])
                 self.assertEqual(app.idle_bar.winfo_manager(), "pack")
                 body = texts(app.body)
-                self.assertEqual(body.count("기록 없음"), 4)
-                self.assertIn("앱 동기화 제공 스킬이라 여기서 삭제할 수 없습니다", body)  # view-only: no tick box, only the reason
+                self.assertEqual(body.count("기록 없음"), 3)
+                self.assertFalse(any("삭제할 수 없습니다" in t for t in body))
                 self.assertEqual(set(app.checks), {"stale-a", "stale-b", "stale-link"})
                 self.assertTrue(any(t.startswith("대화 기록이") and "부터만 남아" in t for t in body))  # the test logs are minutes old
                 app.log_start = datetime(2020, 1, 1)  # logs that reach back past the window: no note
@@ -508,7 +510,7 @@ class PanelTest(unittest.TestCase):
                 app.query.set("")
                 self.assertEqual(app.checks["stale-a"][-1].cget("text"), "☑")  # and it is ticked again when it comes back
                 app.select_all()
-                self.assertEqual(app.checked, {"stale-a", "stale-b", "stale-link"})  # not the view-only one
+                self.assertEqual(app.checked, {"stale-a", "stale-b", "stale-link"})
                 app.clear_checks()
                 self.assertEqual(texts(app.idle_bar)[0], "지울 스킬의 ☐를 눌러 체크하세요")
                 app.toggle_theme()
@@ -536,8 +538,8 @@ class PanelTest(unittest.TestCase):
                 self.assertTrue((self.tmp / "src/stale-link/SKILL.md").exists())  # the original stays
                 self.assertTrue(any("stale-a" in p.name for p in (mgr.STORE / "trash").iterdir()))
                 self.assertEqual(app.checked, set())
-                self.assertEqual([s["name"] for s in app.shown], ["grilling", "stale-b"])
-                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "2"])
+                self.assertEqual([s["name"] for s in app.shown], ["stale-b"])
+                self.assertEqual(texts(app.rail)[-2:], [v.IDLE, "1"])
                 self.assertIn("삭제됨: 2개", app.footer.cget("text"))
 
                 saved = app.usage  # without any skill call in the logs every skill looks idle: no list, and the reason
