@@ -83,7 +83,8 @@ def bump(version: str, kind: str) -> str:
 
 def notes_md(version: str, prev: str | None, items: list[tuple[str, str]]) -> str:
     if prev is None:
-        return f"## v{version}\n\n처음으로 버전을 붙인 릴리스입니다. 이전 변경은 커밋 기록에서 볼 수 있습니다.\n" + INSTALL.format(repo=REPO)
+        intro = f"## v{version}\n\n처음으로 버전을 붙인 릴리스입니다. 이전 변경은 커밋 기록에서 볼 수 있습니다.\n"
+        return intro + INSTALL.format(repo=REPO)
     groups: dict[str, list[str]] = {}
     for short, subject in items:
         if BUMP_COMMIT.match(subject):
