@@ -105,7 +105,7 @@ skill-manage-viewer/
 │  ├─ platform_support.py   OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 │  ├─ install.py            시작 메뉴 바로 가기 / macOS .app 만들기·지우기
 │  ├─ skill_update.py       앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기 (git 클론 전용; exe에서는 항상 건너뜀)
-│  ├─ update_check.py       exe·ZIP 설치용 새 버전 알림: `VERSION` 읽기, 릴리스 API 최신 태그 읽기·검증·비교 (Tk 없음). 내려받기·실행은 하지 않음
+│  ├─ update_check.py       exe·macOS 앱·ZIP 설치용 새 버전 알림: `VERSION` 읽기, 릴리스 API 최신 태그 읽기·검증·비교 (Tk 없음). 내려받기·실행은 하지 않음
 │  ├─ __main__.py           `python -m skilldesk` (src를 경로에 넣었을 때)
 │  ├─ data/
 │  │  ├─ skill_categories.json  카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
@@ -122,12 +122,12 @@ skill-manage-viewer/
 │  ├─ test_update_check.py  update_check 테스트: 버전 비교, 릴리스 응답 검증, 실패 무시, exe·git·ZIP 구분
 │  ├─ test_recommend.py     추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 │  └─ test_usage.py · test_release.py · test_check.py · test_privacy.py   그 밖의 테스트
-├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 · build_exe.py + skilldesk.iss: Windows 설치 파일 만들기 (앱은 쓰지 않음; 워크플로가 돌림)
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 · build_exe.py + skilldesk.iss: Windows 설치 파일 · build_mac.py: macOS 앱(dmg) 만들기 (앱은 쓰지 않음; 워크플로가 돌림)
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
 │  ├─ make_screenshots.py   README 스크린샷 다시 찍기
 │  └─ images/               README 스크린샷
-├─ .github/workflows/       ci.yml(Windows·macOS CI) · recommend.yml(매일 추천 목록) · release.yml(버전·릴리스·설치 파일 빌드)
+├─ .github/workflows/       ci.yml(Windows·macOS CI) · recommend.yml(매일 추천 목록) · release.yml(버전·릴리스·설치 파일 빌드·공개)
 ├─ skill_viewer.py          실행 파일(얇음): 시작 메뉴 바로 가기·macOS 앱·`start.*`·옛 설치의 자동 업데이트가 이 경로를 씁니다. 고치지 말고 위치도 옮기지 마세요
 ├─ install.py               `python install.py`용 실행 파일(얇음). 본체는 `src/skilldesk/install.py`
 ├─ skill_viewer.ico         앱 아이콘 (Windows). 이미 만든 바로 가기가 이 경로를 가리킵니다
@@ -339,19 +339,40 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 
 ### Windows 설치 파일 (exe)
 
-릴리스마다 `SkillDesk-Setup-vX.Y.Z.exe`가 릴리스 Assets에 붙습니다. 같은 `release.yml` 안에서 릴리스를 만든 **뒤** `exe` 작업(windows-latest)이 이어서 돌립니다. (`GITHUB_TOKEN`으로 만든 태그는 다른 워크플로를 깨우지 않아서, 별도 워크플로가 아니라 같은 워크플로의 다음 작업으로 둡니다.) 방식은 이렇습니다.
+릴리스마다 `SkillDesk-Setup-vX.Y.Z.exe`가 릴리스 Assets에 붙습니다. 같은 `release.yml` 안에서 릴리스를 만든 **뒤** `exe` 작업(windows-latest)이 이어서 돌립니다. macOS 앱은 같은 때 `mac` 작업이 따로 만들고(아래), 공개는 마지막의 `publish` 작업이 합니다. (`GITHUB_TOKEN`으로 만든 태그는 다른 워크플로를 깨우지 않아서, 별도 워크플로가 아니라 같은 워크플로의 다음 작업으로 둡니다.) 방식은 이렇습니다.
 
 1. 방금 만든 **태그의 커밋**을 체크아웃합니다(버전 올림 커밋이 태그보다 먼저라서, 이래야 exe 안의 `VERSION`이 맞습니다).
 2. `python tools/build_exe.py`: PyInstaller(`--onedir --windowed`)가 `dist/SkillDesk/`를 만들고, Inno Setup(`tools/skilldesk.iss`)이 `dist/SkillDesk-Setup-vX.Y.Z.exe`로 묶습니다. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\SkillDesk`에 설치하고, 시작 메뉴 바로 가기와 제거 항목(설정 → 앱)을 만듭니다. 바탕 화면 바로 가기와 로그인 때 트레이 시작은 설치 중 고르는 선택 항목입니다.
 3. 스모크 테스트: 설치 파일을 조용히 설치 → 파일(글꼴·데이터·`VERSION`)·바로 가기 확인 → `SkillDesk.exe --check` → `--hidden`으로 10초간 실제 시작 → 제거.
-4. 릴리스에 `gh release upload`로 붙이고, 그 **다음에** 릴리스를 공개합니다. 릴리스는 초안으로 만들어 두었다가 설치 파일이 붙은 뒤 `gh release edit --draft=false`로 공개하므로, 공개된 릴리스에는 항상 설치 파일이 있습니다.
+4. 릴리스에 `gh release upload`로 붙입니다. 릴리스는 초안으로 만들어 두었다가 `publish` 작업이 `gh release edit --draft=false`로 공개하므로, 공개된 릴리스에는 항상 설치 파일이 있습니다.
 
 - **PR**에서는 같은 빌드와 스모크 테스트를 돌리되 아무것도 올리지 않습니다(3일간 보관되는 Actions 산출물만 남깁니다. 손으로 설치해 보려면 거기서 받으세요).
-- **빌드가 실패하면** 릴리스는 초안으로 남고(공개되지 않아 앱의 새 버전 알림에도 안 보입니다), Actions 실행이 실패로 표시됩니다. 원인을 고친 뒤 아래 "이미 있는 태그에 붙이기"로 다시 돌리면 붙이고 공개합니다.
+- **exe 빌드가 실패하면** 릴리스는 초안으로 남고(공개되지 않아 앱의 새 버전 알림에도 안 보입니다), Actions 실행이 실패로 표시됩니다. 원인을 고친 뒤 아래 "이미 있는 태그에 붙이기"로 다시 돌리면 붙이고 공개합니다.
 - **이미 있는 태그에 붙이기**: Actions → Release → Run workflow → 태그 입력(예: `v1.1.0`). 태그의 `VERSION`과 일치해야 하고, 그 태그에 `tools/build_exe.py`가 있어야 합니다(이 기능이 들어간 v1.1.0 이전 태그에는 없어서 실패합니다).
 - **로컬에서 만들기**(Windows): `python -m pip install pyinstaller==6.11.1` 후 `winget install JRSoftware.InnoSetup`, 그리고 `python tools/build_exe.py` (`--app-only`는 PyInstaller만). 결과는 `dist/`(git이 무시합니다).
-- **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), `update_check`의 알림만 쓰입니다.
+- **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe·macOS 앱에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), `update_check`의 알림만 쓰입니다.
 - **코드 서명은 하지 않습니다.** SmartScreen·백신 경고가 있을 수 있어 README와 릴리스 노트에 안내합니다. 서명하려면 인증서를 사서 `iscc`의 `SignTool`과 PyInstaller 결과 서명을 넣어야 합니다.
+
+### macOS 설치 파일 (dmg)
+
+릴리스마다 `SkillDesk-vX.Y.Z-macOS-arm64.dmg`도 붙습니다(`mac` 작업, macos-latest). 흐름은 exe와 같습니다: 태그의 커밋 체크아웃 → `python tools/build_mac.py` → 스모크 테스트 → 업로드.
+
+1. `build_mac.py`: `skill_viewer.py --make-icns`로 아이콘을 그리고, PyInstaller(`--onedir --windowed`)가 `dist/SkillDesk.app`을 만듭니다. 그 `Info.plist`에 버전을 적고 **임시(ad-hoc) 서명**(`codesign --force --deep -s -`)을 한 다음, `hdiutil`로 `.app`과 `/Applications` 바로 가기를 담은 dmg를 만듭니다.
+2. 스모크 테스트: dmg를 열어 앱을 복사 → 서명 확인 → 글꼴·데이터·`VERSION` 확인 → `SkillDesk --check` → `--hidden`으로 10초간 실제 시작하고 메뉴 막대 프로세스(`--tray-child`)가 떠 있는지 확인.
+3. **메뉴 막대 프로세스**: macOS에서는 pystray를 별도 프로세스로 띄웁니다(`skill_viewer.tray_child_cmd`). 묶인 앱은 `sys.executable`이 앱 자신이라 스크립트 경로 없이 `--tray-child`만 넘깁니다.
+4. **CPU는 arm64만**입니다. universal2로 만들려면 Pillow·pyobjc 같은 모든 바이너리 패키지와 Python 자체가 두 구조를 다 가져야 하는데, pip는 보통 그 PC의 구조에 맞는 wheel만 받고(Pillow는 구조별로 따로 배포됩니다) 확인할 방법이 CI뿐이라 시도하지 않았습니다. Intel Mac은 소스 설치를 안내합니다(README, 릴리스 노트). Intel용을 더하려면 `macos-15-intel`에서 같은 `mac` 작업을 하나 더 돌리면 됩니다(dmg 이름에 CPU가 들어가 겹치지 않습니다). 릴리스 노트의 링크도 함께 고치세요.
+5. **서명·공증은 하지 않습니다.** Apple Developer ID(유료)가 없어서 처음 실행 때 "확인되지 않은 개발자" 경고가 뜨고, README와 릴리스 노트에 허용 방법을 적었습니다. 공증하려면 Developer ID로 `codesign --options runtime`을 하고 `notarytool`로 제출한 뒤 `stapler`를 붙이도록 `build_mac.py`와 워크플로를 바꿔야 합니다.
+6. 로컬(macOS): `python3 -m pip install -r requirements.txt pyinstaller==6.11.1` 후 `python3 tools/build_mac.py` (`--app-only`는 dmg 없이). 개발 PC가 Windows라면 CI의 PR 실행이 유일한 확인이고, 실제 Mac에서 열어 본 것이 아닙니다. PR 실행이 남기는 `SkillDesk-macOS` 산출물(3일)로 Mac에서 직접 받아 볼 수 있습니다.
+
+### 릴리스 공개 (`publish`)
+
+`exe`·`mac`이 끝나면 `publish` 작업이 릴리스를 초안에서 공개로 바꿉니다.
+
+- **Windows exe는 필수**: 실패하면 공개하지 않고 초안으로 남깁니다.
+- **macOS dmg는 아직 필수가 아님**: 실패해도 공개하되, 릴리스 노트 끝에 "macOS 설치 파일이 없습니다" 안내를 붙입니다(다음 실행에서 dmg가 붙으면 그 안내는 지워집니다). 안정되면 `release.yml`의 `publish` 작업에서 `MAC_REQUIRED: "true"`로 바꾸세요. 그러면 dmg가 없을 때도 초안으로 남습니다.
+- **PR 실행**에서는 `exe`와 `mac` 모두 항상 돌고(관련 파일이 바뀐 PR), 어느 쪽이든 실패하면 PR의 확인이 빨갛게 됩니다. 그래서 머지 전에 잡힙니다. `publish`는 PR에서 돌지 않습니다.
+- **이미 있는 태그에 붙이기**(Run workflow)도 `exe`·`mac`·`publish`를 모두 돌립니다. 빌드 스크립트가 없는 오래된 태그는 "tools/build_mac.py is missing"처럼 이유를 적고 끝납니다(그 태그의 exe가 만들어지면 mac 없이 공개하고 노트에 안내를 붙입니다).
+- 워크플로 문법은 `ci.yml`의 `workflows` 작업(actionlint)이 PR마다 검사합니다.
 
 ## 알려진 한계
 

@@ -1,4 +1,4 @@
-"""Tells an install that git cannot update (the exe installer, a source ZIP) that a newer release exists.
+"""Tells an install that git cannot update (the Windows exe, the macOS app, a source ZIP) that a newer release exists.
 
 It only READS the latest release from GitHub and never downloads or runs anything: the app shows a pill and opens the
 release page when the user clicks it. A git clone keeps skill_update.py's own update and is never asked here, so nobody
@@ -25,12 +25,12 @@ _logged = False  # one log line per run, however often the 6-hourly check fails
 
 
 def frozen() -> bool:
-    """True inside the PyInstaller exe."""
+    """True inside the PyInstaller bundle (the Windows exe or the macOS .app)."""
     return bool(getattr(sys, "frozen", False))
 
 
 def current_version() -> str:
-    """The VERSION file: next to the packages in the exe (PyInstaller's data folder), at the repo top in a source install.
+    """The VERSION file: next to the packages in the exe / .app (PyInstaller's data folder), at the repo top in a source install.
     '' when it is missing or not X.Y.Z."""
     base = Path(getattr(sys, "_MEIPASS", "") or Path(__file__).resolve().parents[2])
     try:
@@ -56,7 +56,7 @@ def release_page(version: str) -> str:
 
 
 def applies() -> bool:
-    """Whether git cannot update this install (the exe, or a folder without .git), so the notice is the way to learn of news."""
+    """Whether git cannot update this install (the exe or .app, or a folder without .git), so the notice is the way to learn of news."""
     return frozen() or not (upd.HERE / ".git").exists()
 
 

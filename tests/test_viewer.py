@@ -1512,6 +1512,13 @@ class PlatformTest(unittest.TestCase):
             got.append(Stub.events.get_nowait())
         self.assertEqual(got, ["toggle", "quit"])
 
+    def test_tray_child_command_for_source_and_packaged_app(self):
+        source = v.tray_child_cmd()
+        self.assertEqual(source[-1], "--tray-child")
+        self.assertTrue(source[-2].endswith("skill_viewer.py"))  # a script for the interpreter to run
+        with mock.patch.object(v.sys, "frozen", True, create=True):
+            self.assertEqual(v.tray_child_cmd(), [v.sys.executable, "--tray-child"])  # the .app has no script
+
     def test_font_scale_keeps_sizes_comparable(self):
         self.assertAlmostEqual(plat.FONT_SCALE, 4 / 3 if plat.MAC else 1.0)
 

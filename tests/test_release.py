@@ -35,6 +35,9 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("git clone https://github.com/sgustjd2/skill-manage-viewer.git", text)  # every release says how to install
         self.assertIn("/releases/download/v1.3.0/SkillDesk-Setup-v1.3.0.exe", text)  # and links its exe
         self.assertIn("추가 정보 → 실행", text)  # the exe is unsigned: say what SmartScreen will show
+        self.assertIn("/releases/download/v1.3.0/SkillDesk-v1.3.0-macOS-arm64.dmg", text)  # the dmg, named as build_mac.py names it
+        self.assertIn("Intel Mac", text)  # and that it is Apple silicon only
+        self.assertIn("xattr -dr com.apple.quarantine", text)  # and how to get past Gatekeeper
 
     def test_the_first_release_has_no_list(self):
         text = release.notes_md("1.0.0", None, [])

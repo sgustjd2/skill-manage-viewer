@@ -24,15 +24,25 @@ INSTALL = """
 
 ### 설치
 
-**Windows (권장): 설치 파일**
+**Windows: 설치 파일**
 
 Python과 Git 없이 쓸 수 있습니다. [SkillDesk-Setup-v{version}.exe][exe]를 받아 실행하세요.
-설치 파일은 릴리스가 올라오고 몇 분 뒤에 아래 Assets에 붙습니다. 아직 없으면 잠시 뒤에 다시 눌러 보세요.
 
 - 서명하지 않은 파일이라 Windows SmartScreen이 "PC를 보호했습니다"라고 할 수 있습니다. **추가 정보 → 실행**을 누르세요.
 - 새 버전이 나오면 앱 위쪽에 알림이 뜹니다. 눌러서 새 설치 파일을 받아 다시 실행하면 됩니다.
 
-**소스로 설치** (macOS는 이쪽): Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README][readme]를 보세요.
+**macOS: 설치 파일** (Apple 칩 Mac, M1 이후)
+
+Python과 Git 없이 쓸 수 있습니다. [SkillDesk-v{version}-macOS-arm64.dmg][mac]를 받아 열고, SkillDesk를 Applications 폴더로 끌어다 놓으세요.
+
+- Intel Mac용 설치 파일은 없습니다. Intel Mac은 아래 "소스로 설치"를 쓰세요.
+- 서명·공증하지 않은 앱이라 처음 열 때 "확인되지 않은 개발자" 경고가 뜹니다.
+  macOS 14 이하는 Finder에서 SkillDesk를 **우클릭 → 열기**,
+  macOS 15 이상은 시스템 설정 → 개인정보 보호 및 보안에서 **그래도 열기**를 누르세요.
+  그래도 안 열리면 터미널에서 `xattr -dr com.apple.quarantine /Applications/SkillDesk.app`을 실행하세요.
+- 새 버전 알림은 Windows와 같습니다. 눌러서 새 dmg를 받아 덮어 넣으면 됩니다.
+
+**소스로 설치** (Intel Mac, 또는 직접 받고 싶을 때): Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README][readme]를 보세요.
 
 ```
 git clone https://github.com/{repo}.git
@@ -44,6 +54,7 @@ python install.py      # macOS: python3 install.py
 `git clone`으로 받아야 새 버전을 자동으로 받습니다. 소스 ZIP으로 받은 설치는 자동 업데이트가 되지 않습니다.
 
 [exe]: https://github.com/{repo}/releases/download/v{version}/SkillDesk-Setup-v{version}.exe
+[mac]: https://github.com/{repo}/releases/download/v{version}/SkillDesk-v{version}-macOS-arm64.dmg
 [readme]: https://github.com/{repo}#빠른-시작-5분
 """
 

@@ -1,9 +1,11 @@
 name: Release
 
 # Every push to main: if the commits since the last tag call for a new version, bump VERSION, tag it and publish a release,
-# then build the Windows installer from that tag, attach it and only then publish the release (it is a draft until then).
-# A pull request only builds and tests the installer (nothing is published). "Run workflow" builds it for a tag that
-# already exists and attaches it to that release (the tag must contain tools/build_exe.py, i.e. be v1.1.0 or later).
+# then build the Windows installer (exe job) and the macOS app (mac job) from that tag, attach them and only then publish
+# the release (publish job; it is a draft until then). The exe is required, the dmg is not (see the publish job).
+# A pull request only builds and tests both (nothing is published). "Run workflow" builds both for a tag that already
+# exists and attaches them to that release (the tag must contain tools/build_exe.py, i.e. be v1.1.0 or later;
+# tools/build_mac.py for the macOS app).
 on:
   push:
     branches: [main]
@@ -11,6 +13,7 @@ on:
     paths:
       - "src/**"
       - "tools/build_exe.py"
+      - "tools/build_mac.py"
       - "tools/skilldesk.iss"
       - "skill_viewer.py"
       - "skill_viewer.ico"
@@ -20,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to build and attach the installer to (e.g. v1.1.0)"
+        description: "Existing release tag to build and attach the installers to (e.g. v1.1.0)"
         required: true
 
 permissions:
@@ -124,9 +127,97 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$env:TAG" (Get-Item dist/SkillDesk-Setup-v*.exe).FullName --clobber
         shell: pwsh
-      - name: Publish the release (it was a draft, so nobody saw it without the installer)
+
+  # Same shape as the exe job, on macOS. Its build is not required for a release yet (see MAC_REQUIRED in the publish job),
+  # but on a pull request it always runs and a failure turns the check red.
+  mac:
+    needs: release
+    if: ${{ !cancelled() && (github.event_name != 'push' || needs.release.outputs.version != '') }}
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.event_name == 'push' && format('v{0}', needs.release.outputs.version) || github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}  # the tagged commit, so VERSION inside the app is the released one (empty on a pull request: its own commit)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag matches VERSION
+        if: env.TAG != ''
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          [ "$TAG" = "v$v" ] || { echo "::error::tag $TAG does not match VERSION $v"; exit 1; }
+          [ -f tools/build_mac.py ] || { echo "::error::$TAG predates the macOS build (tools/build_mac.py is missing)"; exit 1; }
+      - run: python -m pip install -r requirements.txt pyinstaller==6.11.1
+      - run: python tools/build_mac.py
+      - name: Smoke test the app (open the dmg, copy the app out, start it)
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          dmg=$(ls dist/SkillDesk-v"$v"-macOS-*.dmg)
+          work=$(mktemp -d)
+          log="$HOME/.skill-manager/error.log"
+          fail() { [ -f "$log" ] && cat "$log"; echo "::error::$1"; exit 1; }
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$work/dmg" > /dev/null
+          [ -d "$work/dmg/SkillDesk.app" ] || fail "no SkillDesk.app in the dmg"
+          [ -L "$work/dmg/Applications" ] || fail "no Applications shortcut in the dmg"
+          ditto "$work/dmg/SkillDesk.app" "$work/SkillDesk.app"  # what dragging it to Applications does
+          hdiutil detach "$work/dmg" > /dev/null
+          app="$work/SkillDesk.app"
+          bin="$app/Contents/MacOS/SkillDesk"
+
+          echo "CPU of the app: $(lipo -archs "$bin") (this machine: $(uname -m))"
+          codesign --verify --deep --strict "$app" || fail "the ad-hoc signature does not verify"
+          for f in skilldesk/assets/fonts/Pretendard-Regular.otf skilldesk/data/skill_notes.json skilldesk/data/skill_recommend.json; do
+            [ -n "$(find "$app/Contents" -path "*/$f")" ] || fail "missing in the app: $f"
+          done
+          [ -n "$(find "$app/Contents" -maxdepth 3 -name VERSION -exec grep -lx "$v" {} +)" ] || fail "VERSION inside the app is not $v"
+
+          "$bin" --check > "$work/check.txt" || { rc=$?; cat "$work/check.txt"; fail "SkillDesk --check exited with $rc"; }
+
+          "$bin" --hidden > "$work/hidden.txt" 2>&1 &  # the real start-up: window, fonts, lock, menu-bar process
+          pid=$!
+          sleep 10
+          kill -0 "$pid" 2> /dev/null || { cat "$work/hidden.txt"; fail "SkillDesk --hidden exited within 10 seconds"; }
+          pgrep -f -- "$bin --tray-child" > /dev/null || { cat "$work/hidden.txt"; fail "the menu-bar process (--tray-child) is not running"; }
+          pkill -f "$bin" || true
+          echo "macOS app smoke test passed for v$v"
+      - name: Keep the dmg from this pull request for 3 days (to try it by hand)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkillDesk-macOS
+          path: dist/SkillDesk-v*-macOS-*.dmg
+          retention-days: 3
+      - name: Attach the dmg to the release
         if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$env:TAG" --draft=false
-        shell: pwsh
+        run: gh release upload "$TAG" dist/SkillDesk-v*-macOS-*.dmg --clobber
+
+  # The one place a release goes public. The Windows installer must be attached; the macOS dmg may be missing (and the notes
+  # then say so) until the macOS build has proved stable: then set MAC_REQUIRED to "true" and a missing dmg keeps the draft.
+  publish:
+    needs: [release, exe, mac]
+    if: ${{ !cancelled() && needs.exe.result == 'success' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.release.outputs.version != '')) }}
+    runs-on: ubuntu-latest
+    env:
+      MAC_REQUIRED: "false"
+      MAC: ${{ needs.mac.result }}
+      TAG: ${{ github.event_name == 'push' && format('v{0}', needs.release.outputs.version) || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish the release (it was a draft, so nobody saw it before its installers were attached)
+        run: |
+          if [ "$MAC" != success ] && [ "$MAC_REQUIRED" = true ]; then
+            echo "::error::the macOS app was not built and MAC_REQUIRED is on: the release stays a draft"; exit 1
+          fi
+          gh release view "$TAG" --json body --jq .body | sed '/<!-- mac-missing -->/,$d' > notes.md  # drop a note left by an earlier run
+          [ -s notes.md ] || { echo "::error::the notes of $TAG could not be read"; exit 1; }
+          if [ "$MAC" != success ]; then
+            printf '%s\n' '' '<!-- mac-missing -->' \
+              '> ⚠ **이번 릴리스에는 macOS 설치 파일이 없습니다.** macOS 빌드가 실패했습니다. macOS에서는 위의 "소스로 설치"를 쓰거나 다음 릴리스를 기다려 주세요. Windows 설치 파일은 정상입니다.' >> notes.md
+          fi
+          gh release edit "$TAG" --notes-file notes.md --draft=false

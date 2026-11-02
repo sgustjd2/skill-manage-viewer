@@ -276,6 +276,13 @@ def tray_child() -> None:
     icon.run()
 
 
+def tray_child_cmd() -> list[str]:
+    """How to start the menu-bar process: the packaged .app is its own interpreter (no script to hand over)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--tray-child"]
+    return [sys.executable, str(ROOT / "skill_viewer.py"), "--tray-child"]
+
+
 def make_icns(path: Path) -> None:
     icon_image(1024).save(path, format="ICNS")
 
@@ -1288,8 +1295,7 @@ class App:
         if plat.MAC:
             # pystray must own the main thread on macOS and Tk needs it too, so the menu-bar icon lives in its own
             # process and reports clicks as one command per line.
-            self.tray_proc = subprocess.Popen([sys.executable, str(ROOT / "skill_viewer.py"), "--tray-child"],
-                                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            self.tray_proc = subprocess.Popen(tray_child_cmd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             threading.Thread(target=self._read_tray, daemon=True).start()
             return
         import pystray
