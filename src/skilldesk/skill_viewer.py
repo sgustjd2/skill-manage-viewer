@@ -517,7 +517,7 @@ class App:
         actions.pack(side="right", padx=(0, 8))
         # created before self.footer exists; the hint handlers only touch it when the pointer is over a button
         for text, cmd, hint in (("＋ 추가", self.add_dialog, "스킬 추가 (링크로 설치 · 새로 만들기 · 추천)"),
-                                ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬의 업데이트 확인"),
+                                ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬과 SkillDesk 새 버전 확인"),
                                 ("⟳", self.load, "목록 새로고침"),
                                 ("⚙", self.settings_dialog, "설정 (표시할 에이전트)"),
                                 ("프로젝트", self.harness_dialog, "프로젝트별 스킬 세트 (하네스) 관리"),
@@ -1113,12 +1113,13 @@ class App:
 
     # ---- updates ----------------------------------------------------------------------------
     def check_updates(self, repos: list[Path] | None = None) -> None:
+        check_app = repos is None and uc.applies()  # the button also asks about SkillDesk itself when git cannot update it
         if repos is None:
             repos = sorted({s["repo"] for skills in self.data.values() for s in skills if s["repo"]}, key=str)
-        if not repos:
+        if not repos and not check_app:
             self.say("업데이트를 확인할 git 스킬이 없습니다")
             return
-        self.say(f"업데이트 확인 중… ({len(repos)}개 저장소)", ms=60_000)
+        self.say(f"업데이트 확인 중… ({len(repos)}개 저장소)" if repos else "SkillDesk 업데이트 확인 중…", ms=60_000)
 
         def work():
             found, errors = [], []
@@ -1128,21 +1129,26 @@ class App:
                         found.append(r)
                 except mgr.ManagerError as e:
                     errors.append(f"{mgr.repo_name(r)}: {e}")
-            return found, errors
+            return found, errors, uc.release_state() if check_app else None
         self.bg(work, self._offer_updates)
 
     def _offer_updates(self, res) -> None:
         if isinstance(res, Exception):
             self.say(f"업데이트 확인 실패: {res}", warn=True)
             return
-        found, errors = res
+        found, errors, app = res
         self.updatable = set(found)
         self.render()
+        note = self._release_note(app, manual=True) if app else None
         if errors:
             messagebox.showwarning("일부 저장소를 확인하지 못했습니다", "\n".join(errors), parent=self.root)
         if not found:
-            self.say("모두 최신입니다" if not errors else "확인된 저장소는 모두 최신입니다")
+            has_git = any(s["repo"] for skills in self.data.values() for s in skills)
+            skills = ("확인된 저장소는 모두 최신입니다" if errors else "모두 최신입니다") if has_git else ""
+            self.say(" · ".join(filter(None, [skills, note])), ms=10_000)
             return
+        if note:
+            self.say(note, ms=10_000)
         users = Counter(s["repo"] for skills in self.data.values() for s in skills if s["repo"] in found)
         lines = "\n".join(f"· {mgr.repo_name(r)}  (스킬 {users[r]}개 연결)" for r in found)
         if messagebox.askyesno("업데이트", f"새 버전이 있는 저장소 {len(found)}개:\n{lines}\n\n지금 업데이트할까요?",
@@ -1248,7 +1254,7 @@ class App:
             if not mgr.load_settings().get("auto_update", True):
                 return
         if uc.applies():  # the exe or a ZIP copy: git cannot update it, so only tell the user a newer release exists
-            self.bg(uc.newer_release, lambda v: self._release_found(v, manual))
+            self.bg(uc.release_state, lambda st: self._release_found(st, manual))
             return
         if self.pending_restart:  # the new code is already on disk; asking GitHub again would only repeat it
             if manual:
@@ -1286,16 +1292,23 @@ class App:
         elif manual and res.status in ("up-to-date", "skipped"):
             self.say("SkillDesk는 최신 버전입니다" if res.status == "up-to-date" else res.detail, ms=8000)
 
-    def _release_found(self, version, manual: bool = False) -> None:
-        if not isinstance(version, str):  # nothing newer, offline, or the check failed (update_check.py logged why)
-            if manual:
-                self.say("SkillDesk는 최신 버전입니다", ms=8000)
-            return
-        first = self.new_release != version
-        self.new_release = version
-        self._show_release_pill()
-        if first or manual:
-            self.say(f"SkillDesk {version} 버전이 나왔습니다. 위쪽의 '받기'를 누르면 내려받는 페이지가 열립니다", ms=10_000)
+    def _release_note(self, state, manual: bool) -> str | None:
+        """Shows the pill for a newer release and returns the sentence to say, or None when nothing should be said."""
+        status, version = state if isinstance(state, tuple) else ("failed", None)  # a crashed worker is a failed check
+        if status == "newer":
+            first = self.new_release != version
+            self.new_release = version
+            self._show_release_pill()
+            if first or manual:
+                return f"SkillDesk {version} 버전이 나왔습니다. 위쪽의 '받기'를 누르면 내려받는 페이지가 열립니다"
+        elif manual:  # the automatic check stays silent offline (update_check.py logged why)
+            return "SkillDesk 새 버전을 확인하지 못했습니다" if status == "failed" else "SkillDesk는 최신 버전입니다"
+        return None
+
+    def _release_found(self, state, manual: bool = False) -> None:
+        note = self._release_note(state, manual)
+        if note:
+            self.say(note, ms=10_000)
 
     def _header_pill(self, text: str, command) -> tk.Label:
         c = self.c

@@ -105,6 +105,16 @@ class FetchTest(unittest.TestCase):
                 self.assertIn("offline", first)
         self.assertEqual(self.log.read_text(encoding="utf-8"), first)  # later failures didn't write again
 
+    def test_release_state_tells_newer_latest_and_failed_apart(self):
+        with mock.patch.object(uc.urllib.request, "urlopen", side_effect=lambda *a, **k: answer({"tag_name": "v1.10.0"})):
+            self.assertEqual(uc.release_state("1.9.0"), ("newer", "1.10.0"))
+            self.assertEqual(uc.release_state("1.10.0"), ("latest", None))
+            self.assertEqual(uc.release_state("2.0.0"), ("latest", None))
+            with mock.patch.object(uc, "current_version", return_value=""):
+                self.assertEqual(uc.release_state(), ("failed", None))  # no readable VERSION
+        with mock.patch.object(uc.urllib.request, "urlopen", side_effect=urllib.error.URLError("offline")):
+            self.assertEqual(uc.release_state("1.0.0"), ("failed", None))
+
     def test_an_unwritable_log_does_not_break_the_check(self):
         with mock.patch.object(mgr, "STORE", Path(self._tmp.name) / "file-not-folder"):
             (Path(self._tmp.name) / "file-not-folder").write_text("x", encoding="utf-8")
