@@ -681,7 +681,7 @@ class PanelTest(unittest.TestCase):
         app = self.app
         try:
             with mock.patch.object(v.uc, "applies", return_value=True), mock.patch.object(upd, "apply") as git_update:
-                with mock.patch.object(v.uc, "newer_release", return_value="9.9.9") as newer:
+                with mock.patch.object(v.uc, "release_state", return_value=("newer", "9.9.9")) as newer:
                     app.auto_update()
                     self.settle(lambda: app.new_release)
                     git_update.assert_not_called()  # no second notice from the git updater
@@ -699,13 +699,20 @@ class PanelTest(unittest.TestCase):
                         app.root.update()
                         opened.assert_called_once_with("https://github.com/sgustjd2/skill-manage-viewer/releases/tag/v9.9.9")
                 app.footer.config(text="")
-                with mock.patch.object(v.uc, "newer_release", return_value=None):
-                    app.auto_update()  # automatic and nothing newer (or offline): silent
+                with mock.patch.object(v.uc, "release_state", return_value=("latest", None)):
+                    app.auto_update()  # automatic and nothing newer: silent
                     app.root.update()
                     app.auto_update(manual=True)
                     self.settle(lambda: "최신 버전" in app.footer.cget("text"))
+                app.footer.config(text="")
+                with mock.patch.object(v.uc, "release_state", return_value=("failed", None)):
+                    app.auto_update()  # offline, automatic: silent
+                    app.root.update()
+                    self.assertEqual(app.footer.cget("text"), "")
+                    app.auto_update(manual=True)  # offline, asked for: says so
+                    self.settle(lambda: "확인하지 못했습니다" in app.footer.cget("text"))
                 mgr.save_setting("auto_update", False)
-                with mock.patch.object(v.uc, "newer_release") as off:
+                with mock.patch.object(v.uc, "release_state") as off:
                     app.auto_update()
                     app.root.update()
                     off.assert_not_called()  # switched off in the settings: no request at all
@@ -1191,6 +1198,30 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(calls, [self.repo.resolve()])
         self.assertIn("aaa → bbb", info.call_args[0][1])
         self.assertEqual(app.updatable, set())
+
+    def test_08b_update_button_also_checks_skilldesk_when_git_cannot_update_it(self):
+        app = self.app
+        with (
+            mock.patch.object(mgr, "has_update", return_value=False),
+            mock.patch.object(v.uc, "applies", return_value=True),
+            mock.patch.object(v.uc, "release_state", return_value=("newer", "9.9.9")),
+        ):
+            app.check_updates()
+            self.settle(lambda: "9.9.9" in app.footer.cget("text"))
+            self.assertEqual(app.new_release, "9.9.9")
+        with (
+            mock.patch.object(mgr, "has_update", return_value=False),
+            mock.patch.object(v.uc, "applies", return_value=False),
+            mock.patch.object(v.uc, "release_state") as asked,
+        ):
+            app.check_updates()  # a git clone has its own updater: no second question
+            self.settle(lambda: "최신" in app.footer.cget("text"))
+            asked.assert_not_called()
+        app.new_release = None
+        if app.release_pill:
+            app.release_pill.destroy()
+            app.release_pill = None
+        app.footer.config(text=v.DEFAULT_HINT)
 
     def test_09_update_check_marks_rows_and_survives_decline(self):
         app = self.app

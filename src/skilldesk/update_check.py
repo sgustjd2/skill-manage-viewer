@@ -95,11 +95,20 @@ def fetch_latest(timeout: float = 10) -> str | None:
     return version
 
 
-def newer_release(current: str | None = None) -> str | None:
-    """The version to tell the user about, or None (up to date, offline, or anything unexpected)."""
+def release_state(current: str | None = None) -> tuple[str, str | None]:
+    """('newer', '1.4.0'), ('latest', None) or ('failed', None): offline, an odd answer or no readable VERSION.
+    Only a click on the update button reports 'failed'; the 6-hourly check ignores it."""
     current = current or current_version()
     latest = fetch_latest()
-    return latest if latest and is_newer(latest, current) else None
+    if not latest or not current:
+        return "failed", None
+    return ("newer", latest) if is_newer(latest, current) else ("latest", None)
+
+
+def newer_release(current: str | None = None) -> str | None:
+    """The version to tell the user about, or None (up to date, offline, or anything unexpected)."""
+    status, version = release_state(current)
+    return version if status == "newer" else None
 
 
 if __name__ == "__main__":
