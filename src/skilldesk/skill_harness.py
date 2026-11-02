@@ -37,6 +37,14 @@ STRUCTURE = [
     (".agents/skills", "프로젝트 전용 스킬 폴더 ← 세트를 적용하면 여기에 연결됩니다"),
 ]
 MAX_SHOWN = 50  # skills listed per folder in the guide
+# The app's starting content for the files "기본 세팅 만들기" writes. The user can replace any of them (saved under
+# "defaults" in harness.json); a file that already exists in the project is never overwritten.
+DEFAULT_FILES = {
+    "CLAUDE.md": "<!-- Claude Code가 이 프로젝트에서 시작할 때마다 읽는 지침입니다. 프로젝트 설명, 작업 규칙을 적어 두세요. -->\n",
+    "AGENTS.md": "<!-- Codex 등 여러 에이전트가 읽는 지침입니다. 프로젝트 설명, 작업 규칙을 적어 두세요. -->\n",
+    ".mcp.json": '{\n  "mcpServers": {}\n}\n',
+    ".claude/settings.json": "{}\n",
+}
 
 
 def _file() -> Path:
@@ -65,7 +73,9 @@ def load() -> dict:
         exclude = [x for x in v.get("exclude", []) if isinstance(x, str)]
         chosen = v.get("set") if v.get("set") in sets else None
         projects[path] = {**v, "set": chosen, "targets": targets or list(PROJECT_DIRS)[:1], "links": links, "exclude": exclude}
-    return {"version": VERSION, "sets": sets, "projects": projects}
+    d = raw.get("defaults")
+    defaults = {k: v for k, v in (d if isinstance(d, dict) else {}).items() if k in DEFAULT_FILES and isinstance(v, str)}
+    return {"version": VERSION, "sets": sets, "projects": projects, "defaults": defaults}
 
 
 def save(data: dict) -> None:
@@ -94,6 +104,58 @@ def delete_set(name: str) -> None:
         if p["set"] == name:
             p["set"] = None
     save(data)
+
+
+# ---- default setup -------------------------------------------------------------------------------
+def default_files() -> dict[str, str]:
+    """The content "기본 세팅 만들기" writes: the app's starting files, with the user's saved edits on top."""
+    return {**DEFAULT_FILES, **load()["defaults"]}
+
+
+def save_defaults(files: dict[str, str]) -> None:
+    """Remember the user's own content for the default files (only what differs from the app's start is stored)."""
+    for rel, text in files.items():
+        if rel.endswith(".json"):
+            try:
+                json.loads(text)
+            except ValueError as e:
+                raise ManagerError(f"{rel}은(는) 올바른 JSON이 아닙니다: {e}") from e
+    data = load()
+    data["defaults"] = {k: v for k, v in files.items() if k in DEFAULT_FILES and v != DEFAULT_FILES[k]}
+    save(data)
+
+
+def init_project(path: str | Path) -> list[Result]:
+    """Create the default files that the project does not have yet. Anything that is already there (even a folder or a
+    broken link under that name) is left alone: status 'exists'. A new file is 'created'. -> one Result per file."""
+    project = _project_path(path)
+    out = []
+    for rel, text in default_files().items():
+        f = project / rel
+        if f.exists() or mgr.is_link(f):
+            out.append(Result("파일", rel, "exists"))
+            continue
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with f.open("x", encoding="utf-8", newline="\n") as fh:  # "x": fails rather than overwrite if it appeared meanwhile
+            fh.write(text)
+        out.append(Result("파일", rel, "created"))
+    return out
+
+
+def missing_defaults(path: str | Path) -> list[str]:
+    """The default files the project does not have yet (what init_project would create)."""
+    project = Path(path)
+    return [rel for rel in default_files() if not (project / rel).exists() and not mgr.is_link(project / rel)]
+
+
+def project_skills(path: str | Path) -> list[str]:
+    """Names of the skills already in the project's skills folders (links and folders alike), whoever put them there."""
+    names = set()
+    for rel in PROJECT_DIRS.values():
+        d = Path(path) / rel
+        if d.is_dir():
+            names |= {p.name for p in d.iterdir() if mgr.NAME_RE.fullmatch(p.name) and (p / "SKILL.md").is_file()}
+    return sorted(names, key=str.lower)
 
 
 # ---- projects ------------------------------------------------------------------------------------
