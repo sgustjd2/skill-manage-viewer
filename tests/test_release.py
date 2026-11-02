@@ -33,6 +33,8 @@ class ReleaseTest(unittest.TestCase):
         self.assertNotIn("버전 1.3.0", text)
         self.assertIn("[v1.2.3과 비교](https://github.com/sgustjd2/skill-manage-viewer/compare/v1.2.3...v1.3.0)", text)
         self.assertIn("git clone https://github.com/sgustjd2/skill-manage-viewer.git", text)  # every release says how to install
+        self.assertIn("/releases/download/v1.3.0/SkillDesk-Setup-v1.3.0.exe", text)  # and links its exe
+        self.assertIn("추가 정보 → 실행", text)  # the exe is unsigned: say what SmartScreen will show
 
     def test_the_first_release_has_no_list(self):
         text = release.notes_md("1.0.0", None, [])

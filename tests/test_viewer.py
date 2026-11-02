@@ -677,6 +677,61 @@ class PanelTest(unittest.TestCase):
         app.toggle_auto_update()
         self.assertTrue(mgr.load_settings()["auto_update"])
 
+    def test_03i2_exe_install_is_told_about_a_newer_release_and_opens_it_only_on_click(self):
+        app = self.app
+        try:
+            with mock.patch.object(v.uc, "applies", return_value=True), mock.patch.object(upd, "apply") as git_update:
+                with mock.patch.object(v.uc, "newer_release", return_value="9.9.9") as newer:
+                    app.auto_update()
+                    self.settle(lambda: app.new_release)
+                    git_update.assert_not_called()  # no second notice from the git updater
+                    newer.assert_called_once()
+                    self.assertIn("새 버전 9.9.9 · 받기", texts(app.actions))
+                    self.assertIn("9.9.9", app.footer.cget("text"))
+                    app.toggle_theme()  # the header is rebuilt, the pill must survive
+                    app.toggle_theme()
+                    self.assertIn("새 버전 9.9.9 · 받기", texts(app.actions))
+                    app.root.update()
+                    with mock.patch.object(v.webbrowser, "open") as opened:
+                        opened.assert_not_called()  # a notice alone opens nothing
+                        pill = next(w for w in walk(app.actions) if isinstance(w, tk.Label) and "받기" in w.cget("text"))
+                        pill.event_generate("<Button-1>", x=2, y=2)
+                        app.root.update()
+                        opened.assert_called_once_with("https://github.com/sgustjd2/skill-manage-viewer/releases/tag/v9.9.9")
+                app.footer.config(text="")
+                with mock.patch.object(v.uc, "newer_release", return_value=None):
+                    app.auto_update()  # automatic and nothing newer (or offline): silent
+                    app.root.update()
+                    app.auto_update(manual=True)
+                    self.settle(lambda: "최신 버전" in app.footer.cget("text"))
+                mgr.save_setting("auto_update", False)
+                with mock.patch.object(v.uc, "newer_release") as off:
+                    app.auto_update()
+                    app.root.update()
+                    off.assert_not_called()  # switched off in the settings: no request at all
+        finally:
+            mgr.save_setting("auto_update", True)
+            app.new_release = None
+            if app.release_pill:
+                app.release_pill.destroy()
+                app.release_pill = None
+            app.footer.config(text=v.DEFAULT_HINT)
+
+    def test_03i3_settings_dialog_shows_the_version_and_the_update_switch(self):
+        app = self.app
+        app.settings_dialog()
+        app.root.update()
+        try:
+            self.assertIn(f"SkillDesk {v.uc.current_version()}", "".join(texts(app.dialog.win)))
+            self.assertLessEqual(app.dialog.win.winfo_reqheight(), app.dialog.win.winfo_height())  # everything fits in the window
+            self.assertTrue(app.dialog.auto.get())
+            app.dialog.auto.set(False)
+            self.assertFalse(mgr.load_settings()["auto_update"])
+        finally:
+            app.dialog.auto.set(True)
+            app.dialog.close()
+        self.assertTrue(mgr.load_settings()["auto_update"])
+
     def test_04_menu_entries(self):
         app = self.app
 

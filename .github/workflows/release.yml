@@ -1,20 +1,41 @@
 name: Release
 
-# Every push to main: if the commits since the last tag call for a new version, bump VERSION, tag it and publish a release.
+# Every push to main: if the commits since the last tag call for a new version, bump VERSION, tag it and publish a release,
+# then build the Windows installer from that tag and attach it to the release.
+# A pull request only builds and tests the installer (nothing is published). "Run workflow" builds it for a tag that
+# already exists and attaches it to that release (the tag must contain tools/build_exe.py, i.e. be v1.1.0 or later).
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - "src/**"
+      - "tools/build_exe.py"
+      - "tools/skilldesk.iss"
+      - "skill_viewer.py"
+      - "skill_viewer.ico"
+      - "VERSION"
+      - "requirements.txt"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and attach the installer to (e.g. v1.1.0)"
+        required: true
 
 permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: ${{ github.event_name == 'push' && 'release' || format('exe-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,3 +52,75 @@ jobs:
         run: |
           git push origin HEAD:main "$TAG"
           gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+
+  # A tag made with GITHUB_TOKEN does not start other workflows, so the build is a job of this one.
+  exe:
+    needs: release
+    if: ${{ !cancelled() && (github.event_name != 'push' || needs.release.outputs.version != '') }}
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event_name == 'push' && format('v{0}', needs.release.outputs.version) || github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}  # the tagged commit, so VERSION inside the exe is the released one (empty on a pull request: its own commit)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag matches VERSION
+        if: env.TAG != ''
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION).Trim()
+          if ($env:TAG -ne "v$v") { throw "tag $env:TAG does not match VERSION $v" }
+          if (-not (Test-Path tools/build_exe.py)) { throw "$env:TAG predates the installer build (tools/build_exe.py is missing)" }
+      - run: python -m pip install -r requirements.txt pyinstaller==6.11.1
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+      - run: python tools/build_exe.py
+      - name: Smoke test the installer (install, start, uninstall)
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION).Trim()
+          $setup = "dist\SkillDesk-Setup-v$v.exe"
+          $app = Join-Path $env:LOCALAPPDATA "Programs\SkillDesk"
+          $log = Join-Path $HOME ".skill-manager\error.log"
+          function Fail($m) { if (Test-Path $log) { Get-Content $log }; throw $m }
+
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          foreach ($p in "SkillDesk.exe", "_internal\VERSION", "_internal\skilldesk\assets\fonts\Pretendard-Regular.otf",
+                         "_internal\skilldesk\data\skill_notes.json", "_internal\skilldesk\data\skill_recommend.json") {
+            if (-not (Test-Path (Join-Path $app $p))) { Fail "missing after install: $p" }
+          }
+          if ((Get-Content (Join-Path $app "_internal\VERSION")).Trim() -ne $v) { Fail "VERSION inside the exe is not $v" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SkillDesk.lnk")) { Fail "no Start menu shortcut" }
+
+          $run = Start-Process (Join-Path $app "SkillDesk.exe") -ArgumentList "--check" -Wait -PassThru
+          if ($run.ExitCode -ne 0) { Fail "SkillDesk.exe --check exited with $($run.ExitCode)" }
+
+          $tray = Start-Process (Join-Path $app "SkillDesk.exe") -ArgumentList "--hidden" -PassThru  # the real start-up: window, fonts, tray
+          Start-Sleep -Seconds 10
+          if ($tray.HasExited) { Fail "SkillDesk.exe --hidden exited with $($tray.ExitCode) within 10 seconds" }
+          Stop-Process -Id $tray.Id -Force
+
+          Start-Process (Join-Path $app "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          for ($i = 0; $i -lt 30 -and (Test-Path (Join-Path $app "SkillDesk.exe")); $i++) { Start-Sleep -Seconds 1 }  # the uninstaller finishes in a copy of itself
+          if (Test-Path (Join-Path $app "SkillDesk.exe")) { Fail "uninstall left SkillDesk.exe behind" }
+          Write-Host "installer smoke test passed for v$v"
+      - name: Keep the installer from this pull request for 3 days (to try it by hand)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkillDesk-Setup
+          path: dist/SkillDesk-Setup-v*.exe
+          retention-days: 3
+      - name: Attach the installer to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:TAG" (Get-Item dist/SkillDesk-Setup-v*.exe).FullName --clobber
+        shell: pwsh

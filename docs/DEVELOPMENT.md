@@ -104,7 +104,8 @@ skill-manage-viewer/
 │  ├─ skill_usage.py        Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 │  ├─ platform_support.py   OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 │  ├─ install.py            시작 메뉴 바로 가기 / macOS .app 만들기·지우기
-│  ├─ skill_update.py       앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기
+│  ├─ skill_update.py       앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기 (git 클론 전용; exe에서는 항상 건너뜀)
+│  ├─ update_check.py       exe·ZIP 설치용 새 버전 알림: `VERSION` 읽기, 릴리스 API 최신 태그 읽기·검증·비교 (Tk 없음). 내려받기·실행은 하지 않음
 │  ├─ __main__.py           `python -m skilldesk` (src를 경로에 넣었을 때)
 │  ├─ data/
 │  │  ├─ skill_categories.json  카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
@@ -118,14 +119,15 @@ skill-manage-viewer/
 │  ├─ test_harness.py       skill_harness 테스트 (임시 폴더)
 │  ├─ test_install.py       install.py 테스트
 │  ├─ test_update.py        skill_update 테스트 (옛 폴더 구조의 설치가 새 구조로 업데이트되는 경우 포함)
+│  ├─ test_update_check.py  update_check 테스트: 버전 비교, 릴리스 응답 검증, 실패 무시, exe·git·ZIP 구분
 │  ├─ test_recommend.py     추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 │  └─ test_usage.py · test_release.py · test_check.py · test_privacy.py   그 밖의 테스트
-├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 (앱은 쓰지 않음; 워크플로가 돌림)
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 · build_exe.py + skilldesk.iss: Windows 설치 파일 만들기 (앱은 쓰지 않음; 워크플로가 돌림)
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
 │  ├─ make_screenshots.py   README 스크린샷 다시 찍기
 │  └─ images/               README 스크린샷
-├─ .github/workflows/       ci.yml(Windows·macOS CI) · recommend.yml(매일 추천 목록) · release.yml(버전·릴리스)
+├─ .github/workflows/       ci.yml(Windows·macOS CI) · recommend.yml(매일 추천 목록) · release.yml(버전·릴리스·설치 파일 빌드)
 ├─ skill_viewer.py          실행 파일(얇음): 시작 메뉴 바로 가기·macOS 앱·`start.*`·옛 설치의 자동 업데이트가 이 경로를 씁니다. 고치지 말고 위치도 옮기지 마세요
 ├─ install.py               `python install.py`용 실행 파일(얇음). 본체는 `src/skilldesk/install.py`
 ├─ skill_viewer.ico         앱 아이콘 (Windows). 이미 만든 바로 가기가 이 경로를 가리킵니다
@@ -334,6 +336,21 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 - `VERSION`을 직접 올렸으면 그 번호를 그대로 릴리스합니다.
 - 처음 머지되는 날은 태그가 없으므로 `VERSION`(1.0.0)으로 첫 릴리스를 만듭니다.
 - 테스트: `python -m unittest tests.test_release -v`
+
+### Windows 설치 파일 (exe)
+
+릴리스마다 `SkillDesk-Setup-vX.Y.Z.exe`가 릴리스 Assets에 붙습니다. 같은 `release.yml` 안에서 릴리스를 만든 **뒤** `exe` 작업(windows-latest)이 이어서 돌립니다. (`GITHUB_TOKEN`으로 만든 태그는 다른 워크플로를 깨우지 않아서, 별도 워크플로가 아니라 같은 워크플로의 다음 작업으로 둡니다.) 방식은 이렇습니다.
+
+1. 방금 만든 **태그의 커밋**을 체크아웃합니다(버전 올림 커밋이 태그보다 먼저라서, 이래야 exe 안의 `VERSION`이 맞습니다).
+2. `python tools/build_exe.py`: PyInstaller(`--onedir --windowed`)가 `dist/SkillDesk/`를 만들고, Inno Setup(`tools/skilldesk.iss`)이 `dist/SkillDesk-Setup-vX.Y.Z.exe`로 묶습니다. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\SkillDesk`에 설치하고, 시작 메뉴 바로 가기와 제거 항목(설정 → 앱)을 만듭니다. 바탕 화면 바로 가기와 로그인 때 트레이 시작은 설치 중 고르는 선택 항목입니다.
+3. 스모크 테스트: 설치 파일을 조용히 설치 → 파일(글꼴·데이터·`VERSION`)·바로 가기 확인 → `SkillDesk.exe --check` → `--hidden`으로 10초간 실제 시작 → 제거.
+4. 릴리스에 `gh release upload`로 붙입니다.
+
+- **PR**에서는 같은 빌드와 스모크 테스트를 돌리되 아무것도 올리지 않습니다(3일간 보관되는 Actions 산출물만 남깁니다. 손으로 설치해 보려면 거기서 받으세요).
+- **이미 있는 태그에 붙이기**: Actions → Release → Run workflow → 태그 입력(예: `v1.1.0`). 태그의 `VERSION`과 일치해야 하고, 그 태그에 `tools/build_exe.py`가 있어야 합니다(이 기능이 들어간 v1.1.0 이전 태그에는 없어서 실패합니다).
+- **로컬에서 만들기**(Windows): `python -m pip install pyinstaller==6.11.1` 후 `winget install JRSoftware.InnoSetup`, 그리고 `python tools/build_exe.py` (`--app-only`는 PyInstaller만). 결과는 `dist/`(git이 무시합니다).
+- **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), `update_check`의 알림만 쓰입니다.
+- **코드 서명은 하지 않습니다.** SmartScreen·백신 경고가 있을 수 있어 README와 릴리스 노트에 안내합니다. 서명하려면 인증서를 사서 `iscc`의 `SignTool`과 PyInstaller 결과 서명을 넣어야 합니다.
 
 ## 알려진 한계
 
