@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -67,7 +68,14 @@ def dmg(version: str) -> Path:
     run("ditto", str(APP), str(stage / "SkillDesk.app"))  # ditto keeps the symlinks and signature inside the bundle
     (stage / "Applications").symlink_to("/Applications")  # drag the app onto it
     out.unlink(missing_ok=True)
-    run("hdiutil", "create", "-volname", "SkillDesk", "-srcfolder", str(stage), "-format", "UDZO", "-ov", str(out))
+    for attempt in range(3):  # macOS sometimes answers "Resource busy" right after another disk image was closed
+        try:
+            run("hdiutil", "create", "-volname", "SkillDesk", "-srcfolder", str(stage), "-format", "UDZO", "-ov", str(out))
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            time.sleep(10)
     shutil.rmtree(stage)
     return out
 

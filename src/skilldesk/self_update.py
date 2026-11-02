@@ -335,7 +335,8 @@ def prepare(download_it: bool = True, manual: bool = False, current: str | None 
 # macOS helper. Everything it needs comes as arguments, none of it is part of this text:
 # 1 pid of the running app, 2 the new app, 3 the installed app, 4 log file, 5 hidden|shown.
 MAC_SCRIPT = r"""#!/bin/sh
-log() { echo "$(date '+%F %T') $*" >> "$4"; }
+LOG=$4
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 i=0
 while kill -0 "$1" 2> /dev/null; do
   i=$((i + 1))
