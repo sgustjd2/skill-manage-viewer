@@ -172,11 +172,7 @@ jobs:
           for f in skilldesk/assets/fonts/Pretendard-Regular.otf skilldesk/data/skill_notes.json skilldesk/data/skill_recommend.json; do
             [ -n "$(find "$app/Contents" -path "*/$f")" ] || fail "missing in the app: $f"
           done
-          found=
-          for p in $(find "$app/Contents" -maxdepth 3 -name VERSION); do
-            [ "$(tr -d '[:space:]' < "$p")" = "$v" ] && found=1
-          done
-          [ -n "$found" ] || fail "VERSION inside the app is not $v"
+          [ -n "$(find "$app/Contents" -maxdepth 3 -name VERSION -exec grep -lx "$v" {} +)" ] || fail "VERSION inside the app is not $v"
 
           "$bin" --check > "$work/check.txt" || { rc=$?; cat "$work/check.txt"; fail "SkillDesk --check exited with $rc"; }
 
@@ -184,7 +180,7 @@ jobs:
           pid=$!
           sleep 10
           kill -0 "$pid" 2> /dev/null || { cat "$work/hidden.txt"; fail "SkillDesk --hidden exited within 10 seconds"; }
-          pgrep -f -- "--tray-child" > /dev/null || { cat "$work/hidden.txt"; fail "the menu-bar process (--tray-child) is not running"; }
+          pgrep -f -- "$bin --tray-child" > /dev/null || { cat "$work/hidden.txt"; fail "the menu-bar process (--tray-child) is not running"; }
           pkill -f "$bin" || true
           echo "macOS app smoke test passed for v$v"
       - name: Keep the dmg from this pull request for 3 days (to try it by hand)
