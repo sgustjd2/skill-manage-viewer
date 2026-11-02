@@ -52,7 +52,9 @@ OTHER = "기타"
 STAR = "★ 자주 쓰는 스킬"  # rail entry listing what the user starred, separately for each agent
 USAGE = "많이 쓴 스킬"  # Claude Code only: skills ranked by how often they were called in a month
 IDLE = "정리 후보"  # Claude Code only, last in the rail: skills not called for two months, to tick and delete
+PLUGINS = "플러그인"  # Claude Code only: the installed plugins themselves (read-only); a row jumps to that plugin's skills
 ABOUT = {c["name"]: c["about"] for c in CATALOG} | {
+    PLUGINS: "설치한 Claude Code 플러그인, 누르면 그 플러그인의 스킬을 봅니다",
     OTHER: "어느 카테고리에도 맞지 않는 스킬",
     STAR: "☆를 눌러 지정한 스킬만 모아 봅니다",
     USAGE: "Claude Code 대화 기록에서 스킬을 부른 횟수, 많은 순",
@@ -76,6 +78,7 @@ CAT_COLORS = {
 # The star entry is not a category, so its colors stay out of CAT_COLORS (a test pairs that with skill_categories.json).
 STAR_COLORS = ("#854F0B", "#FAEEDA", "#EF9F27", "#3F2A0A")
 USAGE_COLORS = ("#0B6380", "#DCF0F7", "#67C7EB", "#123845")
+PLUGINS_COLORS = ("#6D3FC0", "#EDE5FA", "#C3A6F5", "#35264F")
 IDLE_COLORS = ("#475569", "#E8ECF1", "#B6C2D2", "#2C3542")  # slate: neutral, nothing to be alarmed about until the user ticks something
 
 LIGHT = dict(bg="#F4F6F9", surface="#FFFFFF", rail="#EBEFF5", line="#CBD3DE", text="#0F172A", muted="#475569",
@@ -350,6 +353,7 @@ class App:
         self.icons: dict[str, list[tk.Label]] = {}  # the ☆/★ labels on screen for each skill name (it can be in two groups)
         self.updatable: set[Path] = set()
         self.data: dict[str, list[dict]] = {}
+        self.plugins: list[dict] = []  # installed Claude Code plugins, read in load()
         self.agents = mgr.chosen_agents()  # tabs shown; set in the settings dialog
         self.agent = tk.StringVar(value=self.agents[0])
         self.query = tk.StringVar()
@@ -397,7 +401,7 @@ class App:
         """(text color, tint) for a category; None (= all) uses the app accent."""
         if cat is None:
             return self.c["accent"], self.c["soft"]
-        special = {STAR: STAR_COLORS, USAGE: USAGE_COLORS, IDLE: IDLE_COLORS}
+        special = {STAR: STAR_COLORS, USAGE: USAGE_COLORS, IDLE: IDLE_COLORS, PLUGINS: PLUGINS_COLORS}
         fg_l, soft_l, fg_d, soft_d = special.get(cat) or CAT_COLORS[cat]
         return (fg_d, soft_d) if self.theme == "dark" else (fg_l, soft_l)
 
@@ -518,7 +522,7 @@ class App:
         actions.pack(side="right", padx=(0, 8))
         # created before self.footer exists; the hint handlers only touch it when the pointer is over a button
         for text, cmd, hint in (("＋ 추가", self.add_dialog, "스킬 추가 (링크로 설치 · 새로 만들기 · 추천)"),
-                                ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬의 업데이트 확인"),
+                                ("⇧ 업데이트", lambda: self.check_updates(), "git으로 받은 스킬과 SkillDesk 새 버전 확인"),
                                 ("⟳", self.load, "목록 새로고침"),
                                 ("⚙", self.settings_dialog, "설정 (표시할 에이전트)"),
                                 ("프로젝트", self.harness_dialog, "프로젝트별 스킬 세트 (하네스) 관리"),
@@ -611,8 +615,9 @@ class App:
     def load(self) -> None:
         mgr.version.cache_clear()
         data = {a: collect(a) for a in self.agents}
-        if data != self.data:  # rescanning is cheap; redrawing is not, and would also reset what the user is reading
-            self.data = data
+        plugins = mgr.list_plugins()
+        if (data, plugins) != (self.data, self.plugins):  # rescanning is cheap; redrawing is not (it resets what the user reads)
+            self.data, self.plugins = data, plugins
             self.render()
 
     def set_agent(self, name: str) -> None:
@@ -674,7 +679,8 @@ class App:
             def too_new(s: dict) -> bool:  # installed inside the window: it has not had the whole window to be used
                 born = mgr.installed_on(s["path"])
                 return born is not None and born.strftime("%Y-%m") >= window
-            items = [s for s in skills if s["name"] in last and not (self.hide_new.get() and too_new(s))]
+            # plugin/app-provided skills can't be deleted here, so they are not candidates
+            items = [s for s in skills if s["managed"] and s["name"] in last and not (self.hide_new.get() and too_new(s))]
             self._idle_key = key
             self._idle_items = sorted(items, key=lambda s: (last[s["name"]] is not None, last[s["name"]] or "", s["name"]))
         return self._idle_items
@@ -692,21 +698,24 @@ class App:
         idle_all = self._idle(everything) if claude else []  # not narrowed by the search: what is ticked must outlive a search
         shown_names = {s["name"] for s in found}
         idle = [s for s in idle_all if s["name"] in shown_names]
-        if self.cat not in counts and self.cat not in (STAR, USAGE, IDLE) or (self.cat in (USAGE, IDLE) and not claude):
+        plugins = [p for p in self.plugins if q in p["name"].lower()] if claude else []
+        if self.cat not in counts and self.cat not in (STAR, USAGE, IDLE, PLUGINS) or (self.cat in (USAGE, IDLE, PLUGINS) and not claude):
             self.cat = None  # the picked category vanished (search, refresh or another agent)
-        self.shown = starred if self.cat == STAR else used if self.cat == USAGE else idle if self.cat == IDLE else [
-            s for s in found if self.cat in (None, s["cat"])]
+        self.shown = starred if self.cat == STAR else used if self.cat == USAGE else idle if self.cat == IDLE else plugins if (
+            self.cat == PLUGINS) else [s for s in found if self.cat in (None, s["cat"])]
         self.checked &= {s["name"] for s in idle_all if s["managed"]}  # ticked, but gone or no longer idle: not ticked any more
         self._restyle_tabs(agent, {a: f"{a}  {len(self.data.get(a, []))}" for a in self.agents})
         self.subtitle.config(text=f"{agent}에서 사용할 수 있는 스킬")
         idle_count = None if not claude else "–" if self.usage is None else len(idle)  # "–": the logs are counted on the first visit
-        self._draw_rail(counts, len(found), len(starred), len(used) if claude else None, idle_count)
-        self.count.config(text=f"{len(self.shown)}개 스킬" + (f" · '{q}' 검색 결과" if q else ""))
+        self._draw_rail(counts, len(found), len(starred), len(used) if claude else None, idle_count,
+                        len(self.plugins) if claude else None)
+        unit = "플러그인" if self.cat == PLUGINS else "스킬"
+        self.count.config(text=f"{len(self.shown)}개 {unit}" + (f" · '{q}' 검색 결과" if q else ""))
         if rebuild or not self.shown:  # data, agent, search or theme changed (or only the empty note is up): groups are stale
             self.list.clear()
             self.sections, self.icons, self.checks = {}, {}, {}
         groups = [(STAR, self.shown)] if self.cat == STAR else [(USAGE, self.shown)] if self.cat == USAGE else [
-            (IDLE, self.shown)] if self.cat == IDLE else [
+            (IDLE, self.shown)] if self.cat == IDLE else [(PLUGINS, self.shown)] if self.cat == PLUGINS else [
             (cat, [s for s in self.shown if s["cat"] == cat]) for cat in [n for n, _ in CATEGORIES] + [OTHER]
         ]
         wanted = [self._group(cat, items) for cat, items in groups if items]
@@ -727,6 +736,8 @@ class App:
         if not self.shown:
             msg = ("일치하는 스킬이 없습니다" if everything else
                    f"{agent}에 설치된 스킬이 없습니다.\n\n{mgr.AGENT_DIRS[agent]}\n\n위의 ＋ 추가에서 설치할 수 있습니다.")
+            if self.cat == PLUGINS:
+                msg = "일치하는 플러그인이 없습니다" if self.plugins else "설치한 플러그인이 없습니다"
             if self.cat == STAR and everything and not q:
                 msg = "아직 지정한 스킬이 없습니다\n\n스킬 이름 앞의 ☆를 눌러\n자주 쓰는 스킬로 지정하세요."
             if self.cat == USAGE and everything:
@@ -747,14 +758,16 @@ class App:
         if top:
             self.canvas.yview_moveto(0)
 
-    def _draw_rail(self, counts: Counter, total: int, starred: int, used: int | None = None, idle: int | str | None = None) -> None:
+    def _draw_rail(self, counts: Counter, total: int, starred: int, used: int | None = None, idle: int | str | None = None,
+                   plugins: int | None = None) -> None:
         c = self.c
         for w in self.rail.winfo_children():
             w.destroy()
         self._label(self.rail, "카테고리", 10, fg=c["muted"], bg=c["rail"], anchor="w", padx=16, pady=10).pack(fill="x")
         # the star entry is always there, even at 0, so the feature can be found
         top = [(STAR, starred)] + ([(USAGE, used)] if used is not None else []) + [(None, total)]
-        bottom = [(IDLE, idle)] if idle is not None else []  # the cleanup entry is the last one, after every category
+        bottom = ([(PLUGINS, plugins)] if plugins is not None else []) + (
+            [(IDLE, idle)] if idle is not None else [])  # the cleanup entry is the last one, after every category
         for cat, n in top + [(k, counts[k]) for k in [n for n, _ in CATEGORIES] + [OTHER] if counts[k]] + bottom:
             fg, soft = self.cat_colors(cat)
             on = cat == self.cat
@@ -783,9 +796,41 @@ class App:
                 self._idle_head(g)
             now = datetime.now()
             for s in items:
+                if cat == PLUGINS:
+                    self._plugin_row(g, s)
+                    continue
                 self._row(g, s, show_cat=cat in (STAR, USAGE, IDLE), calls=self.calls.get(s["name"]) if cat == USAGE else None,
                           idle=idle_label(self.idle_last.get(s["name"]), now) if cat == IDLE else None)
         return self.sections[cat]
+
+    def _plugin_row(self, parent, p: dict) -> None:
+        """A read-only plugin line; a click lists that plugin's skills (their names start with 'plugin:')."""
+        c = self.c
+        fg, _ = self.cat_colors(PLUGINS)
+        wrap = tk.Frame(parent, bg=c["surface"], cursor="hand2")
+        wrap.pack(fill="x")
+        tk.Frame(wrap, width=self.px(6), bg=fg).pack(side="left", fill="y")
+        f = tk.Frame(wrap, bg=c["surface"], cursor="hand2")
+        f.pack(side="left", fill="x", expand=True)
+        top = tk.Frame(f, bg=c["surface"])
+        top.pack(fill="x", padx=(14, 12), pady=(9, 0))
+        on = p["enabled"]
+        self._label(top, "켜짐" if on else "꺼짐", 9, bold=on, fg=c["on_accent"] if on else c["muted"],
+                    bg=c["accent"] if on else c["rail"], padx=7).pack(side="right")
+        self._label(top, f"스킬 {p['skills']}개", 10, fg=c["muted"]).pack(side="right", padx=10)
+        self._label(top, f"v{p['version']}", 10, fg=c["muted"]).pack(side="right")
+        self._label(top, self._fit(p["name"], self.px(self.W - self.RAIL - 260)), 11, bold=True, anchor="w").pack(side="left")
+        self._label(f, str(p["path"]), 9, fg=c["muted"], anchor="w").pack(fill="x", padx=(14, 12), pady=(2, 9))
+        tk.Frame(parent, height=1, bg=c["line"]).pack(fill="x")
+        for w in (wrap, f, top, *f.winfo_children(), *top.winfo_children()):
+            w.bind("<Button-1>", lambda e, n=p["name"]: self.show_plugin_skills(n))
+
+    def show_plugin_skills(self, name: str) -> None:
+        self.cat = None
+        same = self.query.get() == name + ":"
+        self.query.set(name + ":")  # the search box then shows exactly that plugin's skills
+        if same:  # no change, no trace: draw the skill list ourselves
+            self.render(top=True)
 
     def _section(self, parent, cat: str, n: int) -> None:
         fg, soft = self.cat_colors(cat)
@@ -856,7 +901,7 @@ class App:
         room -= self.px(46) * bool(s["manual"]) + self.px(88) * (s["repo"] in self.updatable) + self.px(60) * bool(calls)
         room -= self.px(86) * bool(idle)
         box = None
-        if idle and s["managed"]:  # ☐/☑ to pick it for deletion; a skill some other app provides can't be deleted here
+        if idle:  # ☐/☑ to pick it for deletion (the idle list only holds skills that may be deleted here)
             box = self._label(top, "", 13, cursor="hand2", padx=2)
             self._paint_check(box, s["name"] in self.checked)
             box.pack(side="left", padx=(0, 4))
@@ -879,8 +924,7 @@ class App:
             self._label(top, "수동", 9, fg=c["warn_fg"], bg=c["warn_bg"], padx=6).pack(side="left", padx=8)
         if s["repo"] in self.updatable:
             self._label(top, "업데이트 있음", 9, bold=True, fg=c["on_accent"], bg=c["accent"], padx=6).pack(side="left", padx=2)
-        text = f"{s['origin']} 제공 스킬이라 여기서 삭제할 수 없습니다" if idle and not s["managed"] else s["note"]
-        note = self._label(f, text, 10, fg=c["muted"], anchor="w", justify="left", wraplength=inner - self.px(28))
+        note = self._label(f, s["note"], 10, fg=c["muted"], anchor="w", justify="left", wraplength=inner - self.px(28))
         note.pack(fill="x", padx=(14, 12), pady=(2, 9))
         tk.Frame(parent, height=1, bg=c["line"]).pack(fill="x")
         parts = (wrap, f, top, name, tag, more, note, *extra)
@@ -1075,12 +1119,17 @@ class App:
 
     # ---- updates ----------------------------------------------------------------------------
     def check_updates(self, repos: list[Path] | None = None) -> None:
+        # the button also asks about SkillDesk itself when git cannot update it (an exe / dmg install updates itself, below)
+        check_app = repos is None and uc.applies() and not su.supported()
+        if repos is None and su.supported():  # an exe / dmg install updates itself: the button is one more way to ask for that
+            self._self_update(manual=True)
         if repos is None:
             repos = sorted({s["repo"] for skills in self.data.values() for s in skills if s["repo"]}, key=str)
-        if not repos:
-            self.say("업데이트를 확인할 git 스킬이 없습니다")
+        if not repos and not check_app:
+            if not su.supported():
+                self.say("업데이트를 확인할 git 스킬이 없습니다")
             return
-        self.say(f"업데이트 확인 중… ({len(repos)}개 저장소)", ms=60_000)
+        self.say(f"업데이트 확인 중… ({len(repos)}개 저장소)" if repos else "SkillDesk 업데이트 확인 중…", ms=60_000)
 
         def work():
             found, errors = [], []
@@ -1090,21 +1139,26 @@ class App:
                         found.append(r)
                 except mgr.ManagerError as e:
                     errors.append(f"{mgr.repo_name(r)}: {e}")
-            return found, errors
+            return found, errors, uc.release_state() if check_app else None
         self.bg(work, self._offer_updates)
 
     def _offer_updates(self, res) -> None:
         if isinstance(res, Exception):
             self.say(f"업데이트 확인 실패: {res}", warn=True)
             return
-        found, errors = res
+        found, errors, app = res
         self.updatable = set(found)
         self.render()
+        note = self._release_note(app, manual=True) if app else None
         if errors:
             messagebox.showwarning("일부 저장소를 확인하지 못했습니다", "\n".join(errors), parent=self.root)
         if not found:
-            self.say("모두 최신입니다" if not errors else "확인된 저장소는 모두 최신입니다")
+            has_git = any(s["repo"] for skills in self.data.values() for s in skills)
+            skills = ("확인된 저장소는 모두 최신입니다" if errors else "모두 최신입니다") if has_git else ""
+            self.say(" · ".join(filter(None, [skills, note])), ms=10_000)
             return
+        if note:
+            self.say(note, ms=10_000)
         users = Counter(s["repo"] for skills in self.data.values() for s in skills if s["repo"] in found)
         lines = "\n".join(f"· {mgr.repo_name(r)}  (스킬 {users[r]}개 연결)" for r in found)
         if messagebox.askyesno("업데이트", f"새 버전이 있는 저장소 {len(found)}개:\n{lines}\n\n지금 업데이트할까요?",
@@ -1213,7 +1267,7 @@ class App:
             self._self_update(manual)
             return
         if uc.applies():  # a ZIP copy: git cannot update it, so only tell the user a newer release exists
-            self.bg(uc.newer_release, lambda v: self._release_found(v, manual))
+            self.bg(uc.release_state, lambda st: self._release_found(st, manual))
             return
         if self.pending_restart:  # the new code is already on disk; asking GitHub again would only repeat it
             if manual:
@@ -1324,16 +1378,23 @@ class App:
             return
         self.quit()
 
-    def _release_found(self, version, manual: bool = False) -> None:
-        if not isinstance(version, str):  # nothing newer, offline, or the check failed (update_check.py logged why)
-            if manual:
-                self.say("SkillDesk는 최신 버전입니다", ms=8000)
-            return
-        first = self.new_release != version
-        self.new_release = version
-        self._show_release_pill()
-        if first or manual:
-            self.say(f"SkillDesk {version} 버전이 나왔습니다. 위쪽의 '받기'를 누르면 내려받는 페이지가 열립니다", ms=10_000)
+    def _release_note(self, state, manual: bool) -> str | None:
+        """Shows the pill for a newer release and returns the sentence to say, or None when nothing should be said."""
+        status, version = state if isinstance(state, tuple) else ("failed", None)  # a crashed worker is a failed check
+        if status == "newer":
+            first = self.new_release != version
+            self.new_release = version
+            self._show_release_pill()
+            if first or manual:
+                return f"SkillDesk {version} 버전이 나왔습니다. 위쪽의 '받기'를 누르면 내려받는 페이지가 열립니다"
+        elif manual:  # the automatic check stays silent offline (update_check.py logged why)
+            return "SkillDesk 새 버전을 확인하지 못했습니다" if status == "failed" else "SkillDesk는 최신 버전입니다"
+        return None
+
+    def _release_found(self, state, manual: bool = False) -> None:
+        note = self._release_note(state, manual)
+        if note:
+            self.say(note, ms=10_000)
 
     def _header_pill(self, text: str, command) -> tk.Label:
         c = self.c
