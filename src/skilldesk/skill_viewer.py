@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ from . import skill_harness as hn
 from . import skill_manager as mgr
 from . import skill_usage as usage
 from . import skill_update as upd
+from . import update_check as uc
 
 HERE = Path(__file__).parent
 ROOT = HERE.parents[1]  # the repo folder: requirements.txt, the icon and the top-level skill_viewer.py launcher
@@ -217,6 +219,7 @@ def load_pins() -> dict[str, set[str]]:
 
 
 def check() -> None:
+    assert uc.current_version(), "VERSION is missing"
     for a in AGENTS:
         skills = collect(a)
         assert all(s["name"] and s["cat"] and s["note"] and s["origin"] for s in skills)
@@ -349,6 +352,8 @@ class App:
         self._last_toggle = 0.0
         self.pending_restart: upd.Result | None = None  # an update was installed; the new code runs after a restart
         self.restart_pill: tk.Label | None = None
+        self.new_release: str | None = None  # exe / ZIP installs: a newer release exists (update_check.py); the pill opens its page
+        self.release_pill: tk.Label | None = None
         self._failed_update = ""  # the version whose update failed, so it is reported once, not every few hours
         self._say_job = None
         self._build()
@@ -541,6 +546,7 @@ class App:
         self.idle_bar = tk.Frame(main, bg=c["surface"], highlightthickness=1, highlightbackground=c["line"])  # packed by _draw_idle_bar
         self.canvas, self.body = self.list.canvas, self.list.body
         self._show_restart_pill()  # a theme switch rebuilds the header; keep the pill if an update is waiting
+        self._show_release_pill()
 
     def _wheel(self, e) -> None:
         try:
@@ -1192,6 +1198,9 @@ class App:
             self.root.after(6 * 3600 * 1000, self.auto_update)
             if not mgr.load_settings().get("auto_update", True):
                 return
+        if uc.applies():  # the exe or a ZIP copy: git cannot update it, so only tell the user a newer release exists
+            self.bg(uc.newer_release, lambda v: self._release_found(v, manual))
+            return
         if self.pending_restart:  # the new code is already on disk; asking GitHub again would only repeat it
             if manual:
                 self.say("이미 새 버전을 받았습니다. 위쪽의 '다시 시작'을 누르세요", ms=6000)
@@ -1228,14 +1237,38 @@ class App:
         elif manual and res.status in ("up-to-date", "skipped"):
             self.say("SkillDesk는 최신 버전입니다" if res.status == "up-to-date" else res.detail, ms=8000)
 
+    def _release_found(self, version, manual: bool = False) -> None:
+        if not isinstance(version, str):  # nothing newer, offline, or the check failed (update_check.py logged why)
+            if manual:
+                self.say("SkillDesk는 최신 버전입니다", ms=8000)
+            return
+        first = self.new_release != version
+        self.new_release = version
+        self._show_release_pill()
+        if first or manual:
+            self.say(f"SkillDesk {version} 버전이 나왔습니다. 위쪽의 '받기'를 누르면 내려받는 페이지가 열립니다", ms=10_000)
+
+    def _header_pill(self, text: str, command) -> tk.Label:
+        c = self.c
+        pill = self._label(self.actions, text, 10, bold=True, fg=c["on_accent"], bg=c["accent"], padx=10, pady=3, cursor="hand2")
+        pill.pack(side="left", padx=(0, 8), before=self.actions.winfo_children()[0])
+        pill.bind("<Button-1>", lambda e: command())
+        return pill
+
     def _show_restart_pill(self) -> None:
         if not self.pending_restart or (self.restart_pill and self.restart_pill.winfo_exists()):
             return
-        c = self.c
-        pill = self.restart_pill = self._label(self.actions, "새 버전 · 다시 시작", 10, bold=True, fg=c["on_accent"], bg=c["accent"],
-                                               padx=10, pady=3, cursor="hand2")
-        pill.pack(side="left", padx=(0, 8), before=self.actions.winfo_children()[0])
-        pill.bind("<Button-1>", lambda e: self.restart())
+        self.restart_pill = self._header_pill("새 버전 · 다시 시작", self.restart)
+
+    def _show_release_pill(self) -> None:
+        if not self.new_release or (self.release_pill and self.release_pill.winfo_exists()):
+            return
+        self.release_pill = self._header_pill(f"새 버전 {self.new_release} · 받기", self.open_release)
+
+    def open_release(self) -> None:
+        """The click is the user's go-ahead: open the release page in the browser (nothing is downloaded or run by the app)."""
+        if self.new_release:
+            webbrowser.open(uc.release_page(self.new_release))
 
     def restart(self) -> None:
         """Start the updated app and close this one."""
@@ -1680,7 +1713,7 @@ class AddDialog:
 
 class SettingsDialog:
     """Which agents the panel shows. Applies on every click; at least one stays on."""
-    W, H = 460, 290
+    W, H = 460, 400
 
     def __init__(self, app: App):
         self.app, c = app, app.c
@@ -1699,6 +1732,12 @@ class SettingsDialog:
             app._label(row, "이 PC에서 발견됨" if a in found else "발견되지 않음", 10,
                        fg=c["muted"], bg=c["bg"]).pack(side="left", padx=8)
             var.trace_add("write", lambda *_, a=a: self.changed(a))
+        app._label(win, f"SkillDesk {uc.current_version() or '?'}", 13, bold=True, bg=c["bg"]).pack(anchor="w", padx=18, pady=(20, 2))
+        self.auto = tk.BooleanVar(value=mgr.load_settings().get("auto_update", True))
+        self.auto.trace_add("write", lambda *_: mgr.save_setting("auto_update", self.auto.get()))
+        app._check(win, "새 버전이 나왔는지 확인하기", self.auto).pack(anchor="w", padx=18, pady=(8, 0))
+        app._label(win, "git으로 받은 설치는 새 버전을 스스로 받고, 설치 파일로 받은 설치는 알려 주기만 합니다. 6시간마다 확인합니다.", 10,
+                   fg=c["muted"], bg=c["bg"], wraplength=app.px(self.W - 40), justify="left").pack(anchor="w", padx=18, pady=(2, 0))
         self.status = app._label(win, "", 10, fg=c["muted"], bg=c["bg"])
         self.status.pack(anchor="w", padx=18, pady=(16, 0))
 
@@ -2444,13 +2483,17 @@ def startup_error_text(e: BaseException) -> str:
     return f"시작하지 못했습니다.\n\n{type(e).__name__}: {e}\n\n자세한 내용: {mgr.STORE / 'error.log'}"
 
 
-def report_startup_failure(e: BaseException) -> None:
-    """pythonw has no console, so a failed start would look like "nothing happened": say why, and keep the traceback."""
+def save_error_log(e: BaseException) -> None:
     import traceback
 
     with contextlib.suppress(OSError):
         mgr.STORE.mkdir(parents=True, exist_ok=True)
         (mgr.STORE / "error.log").write_text("".join(traceback.format_exception(e)), encoding="utf-8")
+
+
+def report_startup_failure(e: BaseException) -> None:
+    """pythonw has no console, so a failed start would look like "nothing happened": say why, and keep the traceback."""
+    save_error_log(e)
     root = tk.Tk()
     root.withdraw()
     messagebox.showerror("SkillDesk를 시작하지 못했습니다", startup_error_text(e), parent=root)
@@ -2461,7 +2504,11 @@ def main() -> None:
     if "--tray-child" in sys.argv:
         tray_child()
     elif "--check" in sys.argv:
-        check()
+        try:
+            check()
+        except Exception as e:  # noqa: BLE001 - the exe has no console: leave the reason in error.log (the installer test prints it)
+            save_error_log(e)
+            raise
     elif "--make-icon" in sys.argv:
         make_ico(ROOT / "skill_viewer.ico")
     elif "--make-icns" in sys.argv:

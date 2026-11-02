@@ -46,6 +46,8 @@ def slug(url: str) -> str:
 
 def eligible(root: Path, official: str = OFFICIAL) -> str:
     """'' if this folder may be updated, else the reason it may not (shown to the user)."""
+    if getattr(sys, "frozen", False):  # the exe installer: update_check.py only tells the user a newer release exists
+        return "설치 파일로 설치한 앱은 새 버전을 알려 드릴 뿐, 스스로 바꾸지 않습니다"
     if not (root / ".git").exists():
         return "git으로 받은 설치가 아니라 자동 업데이트할 수 없습니다 (README의 설치 방법 참고)"
     try:

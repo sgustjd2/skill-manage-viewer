@@ -24,27 +24,27 @@ INSTALL = """
 
 ### 설치
 
-Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README](https://github.com/{repo}#빠른-시작-5분)를 보세요.
+**Windows (권장): 설치 파일**
 
-**Windows**
+Python과 Git 없이 쓸 수 있습니다. [SkillDesk-Setup-v{version}.exe][exe]를 받아 실행하세요.
+설치 파일은 릴리스가 올라오고 몇 분 뒤에 아래 Assets에 붙습니다. 아직 없으면 잠시 뒤에 다시 눌러 보세요.
 
-```
-git clone https://github.com/{repo}.git
-cd skill-manage-viewer
-.\\start.bat
-python install.py
-```
+- 서명하지 않은 파일이라 Windows SmartScreen이 "PC를 보호했습니다"라고 할 수 있습니다. **추가 정보 → 실행**을 누르세요.
+- 새 버전이 나오면 앱 위쪽에 알림이 뜹니다. 눌러서 새 설치 파일을 받아 다시 실행하면 됩니다.
 
-**macOS**
+**소스로 설치** (macOS는 이쪽): Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README][readme]를 보세요.
 
 ```
 git clone https://github.com/{repo}.git
 cd skill-manage-viewer
-./start.command
-python3 install.py
+.\\start.bat          # macOS: ./start.command
+python install.py      # macOS: python3 install.py
 ```
 
 `git clone`으로 받아야 새 버전을 자동으로 받습니다. 소스 ZIP으로 받은 설치는 자동 업데이트가 되지 않습니다.
+
+[exe]: https://github.com/{repo}/releases/download/v{version}/SkillDesk-Setup-v{version}.exe
+[readme]: https://github.com/{repo}#빠른-시작-5분
 """
 
 
@@ -84,7 +84,7 @@ def bump(version: str, kind: str) -> str:
 def notes_md(version: str, prev: str | None, items: list[tuple[str, str]]) -> str:
     if prev is None:
         intro = f"## v{version}\n\n처음으로 버전을 붙인 릴리스입니다. 이전 변경은 커밋 기록에서 볼 수 있습니다.\n"
-        return intro + INSTALL.format(repo=REPO)
+        return intro + INSTALL.format(repo=REPO, version=version)
     groups: dict[str, list[str]] = {}
     for short, subject in items:
         if BUMP_COMMIT.match(subject):
@@ -97,7 +97,7 @@ def notes_md(version: str, prev: str | None, items: list[tuple[str, str]]) -> st
         if groups.get(kind):
             lines += [f"### {title}", *groups[kind], ""]
     lines.append(f"[{prev}과 비교](https://github.com/{REPO}/compare/{prev}...v{version})")
-    return "\n".join(lines) + "\n" + INSTALL.format(repo=REPO)
+    return "\n".join(lines) + "\n" + INSTALL.format(repo=REPO, version=version)
 
 
 def main(argv: list[str]) -> int:

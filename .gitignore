@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 skill_viewer.icns
 .claude/settings.local.json
+build/
+dist/
+SkillDesk.spec
