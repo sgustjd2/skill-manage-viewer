@@ -344,9 +344,10 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 1. 방금 만든 **태그의 커밋**을 체크아웃합니다(버전 올림 커밋이 태그보다 먼저라서, 이래야 exe 안의 `VERSION`이 맞습니다).
 2. `python tools/build_exe.py`: PyInstaller(`--onedir --windowed`)가 `dist/SkillDesk/`를 만들고, Inno Setup(`tools/skilldesk.iss`)이 `dist/SkillDesk-Setup-vX.Y.Z.exe`로 묶습니다. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\SkillDesk`에 설치하고, 시작 메뉴 바로 가기와 제거 항목(설정 → 앱)을 만듭니다. 바탕 화면 바로 가기와 로그인 때 트레이 시작은 설치 중 고르는 선택 항목입니다.
 3. 스모크 테스트: 설치 파일을 조용히 설치 → 파일(글꼴·데이터·`VERSION`)·바로 가기 확인 → `SkillDesk.exe --check` → `--hidden`으로 10초간 실제 시작 → 제거.
-4. 릴리스에 `gh release upload`로 붙입니다.
+4. 릴리스에 `gh release upload`로 붙이고, 그 **다음에** 릴리스를 공개합니다. 릴리스는 초안으로 만들어 두었다가 설치 파일이 붙은 뒤 `gh release edit --draft=false`로 공개하므로, 공개된 릴리스에는 항상 설치 파일이 있습니다.
 
 - **PR**에서는 같은 빌드와 스모크 테스트를 돌리되 아무것도 올리지 않습니다(3일간 보관되는 Actions 산출물만 남깁니다. 손으로 설치해 보려면 거기서 받으세요).
+- **빌드가 실패하면** 릴리스는 초안으로 남고(공개되지 않아 앱의 새 버전 알림에도 안 보입니다), Actions 실행이 실패로 표시됩니다. 원인을 고친 뒤 아래 "이미 있는 태그에 붙이기"로 다시 돌리면 붙이고 공개합니다.
 - **이미 있는 태그에 붙이기**: Actions → Release → Run workflow → 태그 입력(예: `v1.1.0`). 태그의 `VERSION`과 일치해야 하고, 그 태그에 `tools/build_exe.py`가 있어야 합니다(이 기능이 들어간 v1.1.0 이전 태그에는 없어서 실패합니다).
 - **로컬에서 만들기**(Windows): `python -m pip install pyinstaller==6.11.1` 후 `winget install JRSoftware.InnoSetup`, 그리고 `python tools/build_exe.py` (`--app-only`는 PyInstaller만). 결과는 `dist/`(git이 무시합니다).
 - **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), `update_check`의 알림만 쓰입니다.

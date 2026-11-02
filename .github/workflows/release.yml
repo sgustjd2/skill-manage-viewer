@@ -1,7 +1,7 @@
 name: Release
 
 # Every push to main: if the commits since the last tag call for a new version, bump VERSION, tag it and publish a release,
-# then build the Windows installer from that tag and attach it to the release.
+# then build the Windows installer from that tag, attach it and only then publish the release (it is a draft until then).
 # A pull request only builds and tests the installer (nothing is published). "Run workflow" builds it for a tag that
 # already exists and attaches it to that release (the tag must contain tools/build_exe.py, i.e. be v1.1.0 or later).
 on:
@@ -51,7 +51,7 @@ jobs:
           TAG: v${{ steps.release.outputs.version }}
         run: |
           git push origin HEAD:main "$TAG"
-          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+          gh release create "$TAG" --draft --title "$TAG" --notes-file release-notes.md  # shown to nobody until the installer is attached
 
   # A tag made with GITHUB_TOKEN does not start other workflows, so the build is a job of this one.
   exe:
@@ -123,4 +123,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$env:TAG" (Get-Item dist/SkillDesk-Setup-v*.exe).FullName --clobber
+        shell: pwsh
+      - name: Publish the release (it was a draft, so nobody saw it without the installer)
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$env:TAG" --draft=false
         shell: pwsh
