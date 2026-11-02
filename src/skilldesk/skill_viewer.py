@@ -668,7 +668,8 @@ class App:
             def too_new(s: dict) -> bool:  # installed inside the window: it has not had the whole window to be used
                 born = mgr.installed_on(s["path"])
                 return born is not None and born.strftime("%Y-%m") >= window
-            items = [s for s in skills if s["name"] in last and not (self.hide_new.get() and too_new(s))]
+            # plugin/app-provided skills can't be deleted here, so they are not candidates
+            items = [s for s in skills if s["managed"] and s["name"] in last and not (self.hide_new.get() and too_new(s))]
             self._idle_key = key
             self._idle_items = sorted(items, key=lambda s: (last[s["name"]] is not None, last[s["name"]] or "", s["name"]))
         return self._idle_items
@@ -850,7 +851,7 @@ class App:
         room -= self.px(46) * bool(s["manual"]) + self.px(88) * (s["repo"] in self.updatable) + self.px(60) * bool(calls)
         room -= self.px(86) * bool(idle)
         box = None
-        if idle and s["managed"]:  # ☐/☑ to pick it for deletion; a skill some other app provides can't be deleted here
+        if idle:  # ☐/☑ to pick it for deletion (the idle list only holds skills that may be deleted here)
             box = self._label(top, "", 13, cursor="hand2", padx=2)
             self._paint_check(box, s["name"] in self.checked)
             box.pack(side="left", padx=(0, 4))
@@ -873,8 +874,7 @@ class App:
             self._label(top, "수동", 9, fg=c["warn_fg"], bg=c["warn_bg"], padx=6).pack(side="left", padx=8)
         if s["repo"] in self.updatable:
             self._label(top, "업데이트 있음", 9, bold=True, fg=c["on_accent"], bg=c["accent"], padx=6).pack(side="left", padx=2)
-        text = f"{s['origin']} 제공 스킬이라 여기서 삭제할 수 없습니다" if idle and not s["managed"] else s["note"]
-        note = self._label(f, text, 10, fg=c["muted"], anchor="w", justify="left", wraplength=inner - self.px(28))
+        note = self._label(f, s["note"], 10, fg=c["muted"], anchor="w", justify="left", wraplength=inner - self.px(28))
         note.pack(fill="x", padx=(14, 12), pady=(2, 9))
         tk.Frame(parent, height=1, bg=c["line"]).pack(fill="x")
         parts = (wrap, f, top, name, tag, more, note, *extra)
