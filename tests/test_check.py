@@ -5,7 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import check  # noqa: E402  # pyright: ignore[reportMissingImports]
 
 SAMPLE = """..F.E
@@ -31,16 +31,16 @@ FAILED (failures=1, errors=1)
 class CheckTest(unittest.TestCase):
     def test_fast_mode_skips_only_the_window_tests(self):
         classes = check.gui_free_test_classes()
-        self.assertNotIn("test_viewer.PanelTest", classes)
-        self.assertIn("test_viewer.CategoryTest", classes)
+        self.assertNotIn("tests.test_viewer.PanelTest", classes)
+        self.assertIn("tests.test_viewer.CategoryTest", classes)
 
     def test_every_test_module_is_run_and_fast_mode_only_trims_test_viewer(self):
-        every = sorted(p.stem for p in Path(check.ROOT).glob("test_*.py"))
-        self.assertEqual(check.test_targets(False), every)
+        every = sorted(p.stem for p in (Path(check.ROOT) / "tests").glob("test_*.py"))
+        self.assertEqual(check.test_targets(False), [f"tests.{m}" for m in every])
         fast = check.test_targets(True)
-        self.assertNotIn("test_viewer", fast)
-        self.assertTrue(all(m in fast for m in every if m != "test_viewer"))
-        self.assertNotIn("test_viewer.PanelTest", fast)
+        self.assertNotIn("tests.test_viewer", fast)
+        self.assertTrue(all(f"tests.{m}" in fast for m in every if m != "test_viewer"))
+        self.assertNotIn("tests.test_viewer.PanelTest", fast)
 
     def test_only_failure_blocks_are_printed(self):
         out = check.failures(SAMPLE)

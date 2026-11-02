@@ -11,7 +11,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "src" / "skilldesk" / "data"
 BINARY = {".png", ".ico", ".icns", ".otf", ".ttf", ".woff2"}
 
 
@@ -46,8 +47,8 @@ class PrivacyTest(unittest.TestCase):
         """Names that exist only on one person's PC (their own or their employer's skills) don't belong in the
         shared lists: the app classifies unknown skills by keyword and shows each skill's own description."""
         private = {"company-commit-pr", "gitlab-guide-check", "ui-audit", "ui-design", "ui-polish", "ui-qa", "ui-work"}
-        notes = set(json.loads((ROOT / "skill_notes.json").read_text(encoding="utf-8")))
-        listed = {s for c in json.loads((ROOT / "skill_categories.json").read_text(encoding="utf-8")) for s in c["skills"]}
+        notes = set(json.loads((DATA / "skill_notes.json").read_text(encoding="utf-8")))
+        listed = {s for c in json.loads((DATA / "skill_categories.json").read_text(encoding="utf-8")) for s in c["skills"]}
         self.assertEqual(sorted((notes | listed) & private), [])
 
 

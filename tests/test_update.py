@@ -1,4 +1,4 @@
-"""python -m unittest test_update -v   (skill_update: when the app may update itself, and that it can't be left broken)
+"""python -m unittest tests.test_update -v   (skill_update: when the app may update itself, and that it can't be left broken)
 
 Works on a throwaway "official" bare repo and a clone of it; nothing outside the temp folder is touched.
 """
@@ -10,8 +10,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import skill_update as up
+from skilldesk import skill_update as up
 
+REPO = Path(__file__).resolve().parent.parent
+DATA = "src/skilldesk/data/skill_recommend.json"
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
 GOOD_APP = "import sys\nprint('ok', sys.argv[1:])\n"
 BROKEN_APP = "import sys\nsys.exit(3)\n"  # a release that can't start
@@ -59,6 +61,7 @@ class SelfUpdateTest(unittest.TestCase):
 
     def push(self, files: dict[str, str], message: str) -> None:
         for name, text in files.items():
+            (self.work / name).parent.mkdir(parents=True, exist_ok=True)
             (self.work / name).write_text(text, encoding="utf-8")
         sh(self.work, "add", "-A")
         sh(self.work, "commit", "-qm", message)
@@ -133,13 +136,13 @@ class SelfUpdateTest(unittest.TestCase):
     def test_a_data_only_update_needs_no_restart_and_no_pip_or_start_check(self):
         log = self.t / "ran.log"
         probe = [sys.executable, "-c", f"open({str(log)!r}, 'a').write('ran')"]
-        self.push({"skill_recommend.json": "{}\n"}, "Chore: 추천 목록 갱신")
+        self.push({DATA: "{}\n"}, "Chore: 추천 목록 갱신")
         r = up.apply(self.app, self.official, pip_cmd=probe, smoke_cmd=probe)
         self.assertEqual((r.status, r.data_only, r.changes), ("updated", True, ["Chore: 추천 목록 갱신"]))
-        self.assertEqual((self.app / "skill_recommend.json").read_text(encoding="utf-8"), "{}\n")
+        self.assertEqual((self.app / DATA).read_text(encoding="utf-8"), "{}\n")
         self.assertFalse(log.exists())
         # one code file in the same pull, or code in an earlier commit of it, brings the restart back
-        self.push({"skill_recommend.json": "{1}\n"}, "Chore: 추천 목록 갱신")
+        self.push({DATA: "{1}\n"}, "Chore: 추천 목록 갱신")
         self.push({"a.txt": "1"}, "Feat: 코드 변경")
         r = self.apply()
         self.assertEqual((r.status, r.data_only), ("updated", False))
@@ -172,6 +175,18 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual((self.app / "skill_viewer.py").read_text(encoding="utf-8"), GOOD_APP)
         self.push({"skill_viewer.py": GOOD_APP}, "Fix: 고친 버전")  # the maintainer fixes it: the next check succeeds
         self.assertEqual(self.apply().status, "updated")
+
+    def test_a_clone_with_the_old_flat_layout_updates_to_the_src_layout_and_still_starts(self):
+        """Installs made before the code moved to src/skilldesk keep their shortcut to <clone>/skill_viewer.py: after the
+        update that path must still start the app (the real --check, not the stand-in the other tests use)."""
+        tracked = sh(REPO, "ls-files", "skill_viewer.py", "install.py", "requirements.txt", "VERSION", "src").splitlines()
+        text = [n for n in tracked if not n.endswith((".otf", ".ttf"))]  # fonts are only needed by the window
+        self.push({n: (REPO / n).read_text(encoding="utf-8") for n in text}, "Refactor: src 구조로 이동")
+        r = up.apply(self.app, self.official, pip_cmd=self.ok_pip, smoke_cmd=self.smoke)
+        self.assertEqual((r.status, r.data_only), ("updated", False), r.detail)
+        started = subprocess.run(self.smoke, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(started.returncode, 0, started.stderr[-400:])
+        self.assertTrue((self.app / "src/skilldesk/skill_viewer.py").is_file())
 
     def test_unreachable_remote_is_a_failure_not_a_crash(self):
         sh(self.app, "remote", "set-url", "origin", (self.t / "gone.git").as_uri())

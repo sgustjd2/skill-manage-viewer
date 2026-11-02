@@ -9,8 +9,8 @@ reports why it did nothing:
 After pulling it installs any changed dependencies and starts the NEW code once (`--check`); if either fails the
 folder goes back to exactly the commit it was on, so a bad release can't leave the app unable to start.
 
-    python skill_update.py            check only: prints the state and whether an update is waiting
-    python skill_update.py --apply    update now (what the app does by itself every few hours)
+    PYTHONPATH=src python -m skilldesk.skill_update            check only: prints the state and whether an update is waiting
+    PYTHONPATH=src python -m skilldesk.skill_update --apply    update now (what the app does by itself every few hours)
 """
 
 import re
@@ -19,13 +19,13 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import platform_support as plat
-import skill_manager as mgr
+from . import platform_support as plat
+from . import skill_manager as mgr
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[2]  # the repo folder (the git clone); its top-level skill_viewer.py is what starts the app
 OFFICIAL = "sgustjd2/skill-manage-viewer"
 BRANCH = "main"
-DATA_FILES = {"skill_recommend.json"}  # rewritten daily by a workflow; the app re-reads it, so it never needs a restart
+DATA_FILES = {"src/skilldesk/data/skill_recommend.json"}  # rewritten daily by a workflow; the app re-reads it, so it never needs a restart
 
 
 @dataclass

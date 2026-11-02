@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-import skill_usage as u
+from skilldesk import skill_usage as u
 
 
 def tool_line(tid: str, skill: str, ts: str) -> str:

@@ -5,11 +5,11 @@
 ## 토큰을 아끼며 일하기
 
 - **기능 하나 = 브랜치 하나 = 세션 하나.** PR을 올리면 다음 작업은 새 세션에서 합니다. 대화가 길어질수록 도구를 한 번 쓸 때마다 앞의 대화가 전부 다시 전달됩니다.
-- **필요한 곳만 읽기.** 아래 코드 지도로 파일을 고르고, `grep -n`으로 줄 번호를 찾은 뒤 그 부분만 읽습니다. `skill_viewer.py`(약 1,000줄)를 통째로 읽지 마세요.
+- **필요한 곳만 읽기.** 아래 코드 지도로 파일을 고르고, `grep -n`으로 줄 번호를 찾은 뒤 그 부분만 읽습니다. `src/skilldesk/skill_viewer.py`(약 2,500줄)를 통째로 읽지 마세요.
 - **부분 수정.** 기존 파일은 바뀌는 줄만 고치고, 파일 전체를 다시 쓰지 않습니다.
 - **확인은 요약 출력으로.**
   - 수정하는 동안: `python tools/check.py fast` (창이 뜨지 않는 테스트만, 약 30초)
-  - 한 테스트만: `python -m unittest test_viewer.PanelTest.test_03_tabs_search_rail`
+  - 한 테스트만: `python -m unittest tests.test_viewer.PanelTest.test_03_tabs_search_rail`
   - 푸시 직전 한 번: `python tools/check.py` (린트·타입·전체 테스트, 통과하면 단계마다 한 줄, 실패하면 실패 부분만)
 - **CI 실패 로그는 실패 부분만:** `gh run view <번호> --log-failed | grep -A15 -E "^(FAIL|ERROR)"`
 - **이미지는 꼭 필요할 때만.** 화면을 바꿨을 때만 `python docs/make_screenshots.py`를 실행하고, 바뀐 이미지만 엽니다.
@@ -26,7 +26,9 @@
 
 ## 코드 지도
 
-| 할 일 | 볼 곳 |
+아래 `src/skilldesk/`는 앱 패키지, `tests/`는 테스트입니다. 저장소 맨 위의 `skill_viewer.py`·`install.py`·`skill_viewer.ico`는 이미 설치된 사람들의 바로 가기와 자동 업데이트가 쓰는 경로라 **옮기거나 지우지 않습니다**(실행 파일만 얇게 남겼습니다).
+
+| 할 일 | 볼 곳 (`src/skilldesk/` 아래) |
 |---|---|
 | 화면, 탭, 카테고리 목록, 스킬 줄, 메뉴, 트레이 | `skill_viewer.py` – `App` |
 | 스킬 추가 대화상자(링크 설치·새로 만들기) | `skill_viewer.py` – `AddDialog` |
@@ -34,10 +36,11 @@
 | 링크 해석, git 받기, 설치·업데이트·삭제·생성 | `skill_manager.py` |
 | 프로젝트별 스킬 세트(저장·적용·해제·구조 트리), 그 창 | `skill_harness.py`, `skill_viewer.py` – `HarnessWindow` |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
-| 카테고리 정의, 스킬별 한국어 설명 | `skill_categories.json`, `skill_notes.json` |
-| 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `skill_recommend.json` |
+| 카테고리 정의, 스킬별 한국어 설명 | `data/skill_categories.json`, `data/skill_notes.json` |
+| 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `data/skill_recommend.json` |
 | 시작 메뉴 / macOS 앱 등록 | `install.py` |
-| 테스트 | `test_manager.py`(로직), `test_viewer.py`(`PanelTest`만 창을 띄움), `test_install.py`, `test_check.py` |
+| 앱 자동 업데이트 | `skill_update.py` |
+| 테스트 (`tests/`) | `test_manager.py`(로직), `test_viewer.py`(`PanelTest`만 창을 띄움), `test_install.py`, `test_update.py`, `test_check.py` |
 
 ## 지켜야 할 것
 

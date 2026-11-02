@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import platform_support as plat
-import skill_agent as sa
-import skill_manager as mgr
+from skilldesk import platform_support as plat
+from skilldesk import skill_agent as sa
+from skilldesk import skill_manager as mgr
 
 FAKE = r'''
 import json, os, sys, time

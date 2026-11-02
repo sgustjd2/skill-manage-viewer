@@ -19,17 +19,17 @@ MAX_LINES = 40  # of a failing step's output
 
 def gui_free_test_classes() -> list[str]:
     """test_viewer classes except PanelTest (the one that opens windows), found without importing Tk."""
-    text = (ROOT / "test_viewer.py").read_text(encoding="utf-8")
-    return [f"test_viewer.{c}" for c in re.findall(r"^class (\w+)\(unittest\.TestCase\)", text, re.M) if c != "PanelTest"]
+    text = (ROOT / "tests" / "test_viewer.py").read_text(encoding="utf-8")
+    return [f"tests.test_viewer.{c}" for c in re.findall(r"^class (\w+)\(unittest\.TestCase\)", text, re.M) if c != "PanelTest"]
 
 
 def test_targets(fast: bool) -> list[str]:
     """Every test_*.py module (so a new test file is never forgotten); in fast mode test_viewer is cut down to the
     classes that open no window."""
-    modules = sorted(p.stem for p in ROOT.glob("test_*.py"))
+    modules = sorted(f"tests.{p.stem}" for p in (ROOT / "tests").glob("test_*.py"))
     if not fast:
         return modules
-    return [m for m in modules if m != "test_viewer"] + gui_free_test_classes()
+    return [m for m in modules if m != "tests.test_viewer"] + gui_free_test_classes()
 
 
 def failures(output: str) -> str:
@@ -67,7 +67,8 @@ def main(argv: list[str]) -> int:
     )
     if not fast:
         if shutil.which("pyright") or subprocess.run([py, "-m", "pyright", "--version"], capture_output=True).returncode == 0:
-            ok &= step("pyright", [py, "-m", "pyright", "skill_manager.py", "skill_viewer.py", "platform_support.py", "install.py"])
+            typed = [f"src/skilldesk/{m}.py" for m in ("skill_manager", "skill_viewer", "platform_support", "install")]
+            ok &= step("pyright", [py, "-m", "pyright", *typed])
         else:
             print("SKIP  pyright (not installed: pip install pyright)")
     ok &= step("tests" + (" (no windows)" if fast else ""), [py, "-m", "unittest", "-q", *test_targets(fast)], failures)

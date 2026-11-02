@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import platform_support as plat
-import skill_harness as h
-import skill_manager as mgr
+from skilldesk import platform_support as plat
+from skilldesk import skill_harness as h
+from skilldesk import skill_manager as mgr
 
 
 def write_skill(d: Path) -> None:

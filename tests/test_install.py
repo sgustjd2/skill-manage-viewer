@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import install
-import platform_support as plat
+from skilldesk import install
+from skilldesk import platform_support as plat
 
 
 class MacBundle(unittest.TestCase):

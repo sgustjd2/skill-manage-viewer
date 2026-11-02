@@ -16,9 +16,9 @@ Release only ever undoes the manifest, so a folder the user made by hand is neve
 import json
 from pathlib import Path
 
-import platform_support as plat
-import skill_manager as mgr
-from skill_manager import ManagerError, Result
+from . import platform_support as plat
+from . import skill_manager as mgr
+from .skill_manager import ManagerError, Result
 
 VERSION = 1
 # label shown to the user -> folder inside the project
