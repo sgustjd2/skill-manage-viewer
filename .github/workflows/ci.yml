@@ -21,3 +21,9 @@ jobs:
       - run: python -m pip install -r requirements.txt ruff
       - run: python tools/check.py  # ruff + every test_*.py; prints only failures, so logs stay short
 
+  workflows:
+    name: workflow syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color  # a broken release.yml would block the next release
