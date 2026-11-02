@@ -717,6 +717,128 @@ class PanelTest(unittest.TestCase):
                 app.release_pill = None
             app.footer.config(text=v.DEFAULT_HINT)
 
+    def test_03i2b_exe_install_downloads_verifies_and_applies_the_new_installer_without_surprises(self):
+        app = self.app
+        staged = v.su.Staged("staged", "9.9.9", Path("setup.exe"), "0" * 64)
+        pill = "새 버전 · 지금 업데이트"
+        try:
+            with (
+                mock.patch.object(v.su, "supported", return_value=True),
+                mock.patch.object(v.su, "prepare", return_value=staged) as prepare,
+                mock.patch.object(v.su, "apply") as apply,
+                mock.patch.object(app, "quit") as quit_,
+                mock.patch.object(upd, "apply") as git_update,
+            ):
+                app.auto_update()
+                self.settle(lambda: app.staged)
+                git_update.assert_not_called()
+                prepare.assert_called_once_with(True, False)  # download: the switch is on
+                self.assertIn(pill, texts(app.actions))
+                self.assertIn("9.9.9", app.footer.cget("text"))
+                apply.assert_not_called()  # the window is open: the user decides when
+                app.auto_update()
+                app.auto_update(manual=True)
+                prepare.assert_called_once()  # downloaded already: no second download
+                app.toggle_theme()  # the header is rebuilt, the pill must survive
+                app.toggle_theme()
+                self.assertIn(pill, texts(app.actions))
+                app.root.update()
+                pill_label = next(w for w in walk(app.actions) if isinstance(w, tk.Label) and w.cget("text") == pill)
+                with mock.patch.object(app, "_unsaved_edits", return_value=True):  # SKILL.md edits not saved
+                    app.detail_win = mock.Mock(**{"discard_ok.return_value": False})
+                    pill_label.event_generate("<Button-1>", x=2, y=2)
+                    app.root.update()
+                    apply.assert_not_called()
+                    quit_.assert_not_called()  # the user said no to throwing the edits away
+                    app.install_update(ask=False)
+                    apply.assert_not_called()  # the automatic path never asks, so it never cuts edits off
+                    app.detail_win = None
+                pill_label.event_generate("<Button-1>", x=2, y=2)
+                app.root.update()
+                apply.assert_called_once_with(staged, hidden=False)
+                quit_.assert_called_once()
+        finally:
+            app.staged = None
+            app._applying = False
+            app.detail_win = None
+            if app.update_pill:
+                app.update_pill.destroy()
+                app.update_pill = None
+            app.footer.config(text=v.DEFAULT_HINT)
+
+    def test_03i2c_hidden_window_switches_at_once_and_failures_fall_back_to_the_notice(self):
+        app = self.app
+        staged = v.su.Staged("staged", "9.9.9", Path("setup.exe"), "0" * 64)
+        try:
+            with (
+                mock.patch.object(v.su, "supported", return_value=True),
+                mock.patch.object(v.su, "apply") as apply,
+                mock.patch.object(app, "quit") as quit_,
+            ):
+                app.hide()
+                with mock.patch.object(app, "_unsaved_edits", return_value=True):
+                    app._prepared(staged)  # a hidden window with unsaved edits waits for the user
+                apply.assert_not_called()
+                app.staged = None
+                app._prepared(staged)
+                apply.assert_called_once_with(staged, hidden=True)  # nobody is looking: apply and start hidden again
+                quit_.assert_called_once()
+                app.show()
+                app._applying = False
+                app.staged = None
+                apply.side_effect = v.su.UpdateError("denied")  # the installer could not be started: still the old, working app
+                app.staged = staged
+                app.install_update()
+                self.assertIsNone(app.staged)
+                self.assertFalse(app._applying)
+                self.assertIn("업데이트를 시작하지 못했습니다", app.footer.cget("text"))
+                self.assertIn("새 버전 9.9.9 · 받기", texts(app.actions))  # the old notice with the release page
+                self.assertNotIn("새 버전 · 지금 업데이트", texts(app.actions))
+                app.footer.config(text="")
+                app._prepared(v.su.Staged("failed", "9.9.9", detail="해시가 달라 지웠습니다"))
+                self.assertEqual(app.footer.cget("text"), "")  # that version was reported above: once only
+                app._prepared(v.su.Staged("failed", "9.9.8", detail="해시가 달라 지웠습니다"))
+                self.assertIn("해시가 달라", app.footer.cget("text"))
+                app.footer.config(text="")
+                app._prepared(v.su.Staged("up-to-date"), manual=True)
+                self.assertIn("최신 버전", app.footer.cget("text"))
+        finally:
+            app.staged = None
+            app._applying = False
+            app._updating = False
+            app.new_release = None
+            app._failed_update = ""
+            for name in ("update_pill", "release_pill"):
+                if getattr(app, name):
+                    getattr(app, name).destroy()
+                    setattr(app, name, None)
+            app.footer.config(text=v.DEFAULT_HINT)
+
+    def test_03i2d_switch_off_only_tells_and_a_running_download_is_not_started_twice(self):
+        app = self.app
+        try:
+            mgr.save_setting("auto_update", False)
+            with (
+                mock.patch.object(v.su, "supported", return_value=True),
+                mock.patch.object(v.su, "prepare", return_value=v.su.Staged("notice", "9.9.9")) as prepare,
+            ):
+                app.auto_update()
+                self.settle(lambda: app.new_release)
+                prepare.assert_called_once_with(False, False)  # download=False: the notice only
+                self.assertIn("새 버전 9.9.9 · 받기", texts(app.actions))
+                app._updating = True
+                app.auto_update()
+                app.auto_update(manual=True)
+                prepare.assert_called_once()  # one is already running
+        finally:
+            mgr.save_setting("auto_update", True)
+            app._updating = False
+            app.new_release = None
+            if app.release_pill:
+                app.release_pill.destroy()
+                app.release_pill = None
+            app.footer.config(text=v.DEFAULT_HINT)
+
     def test_03i3_settings_dialog_shows_the_version_and_the_update_switch(self):
         app = self.app
         app.settings_dialog()

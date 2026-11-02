@@ -105,7 +105,8 @@ skill-manage-viewer/
 │  ├─ platform_support.py   OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 │  ├─ install.py            시작 메뉴 바로 가기 / macOS .app 만들기·지우기
 │  ├─ skill_update.py       앱 자신의 자동 업데이트: 안전 조건 확인, fast-forward, 새 코드 시험 실행, 실패 시 되돌리기 (git 클론 전용; exe에서는 항상 건너뜀)
-│  ├─ update_check.py       exe·macOS 앱·ZIP 설치용 새 버전 알림: `VERSION` 읽기, 릴리스 API 최신 태그 읽기·검증·비교 (Tk 없음). 내려받기·실행은 하지 않음
+│  ├─ self_update.py        exe·dmg 설치용 자동 업데이트: 릴리스 읽기 → 자산 고르기 → 허용 주소만 내려받기(크기·시간 제한) → SHA-256 대조 → Windows는 설치 파일 조용히 실행, macOS는 .app 교체 스크립트 (Tk 없음)
+│  ├─ update_check.py       ZIP 설치(와 자동 업데이트를 못 하는 exe·dmg)용 새 버전 알림: `VERSION` 읽기, 릴리스 API 읽기·검증·비교 (Tk 없음). 내려받기·실행은 하지 않음
 │  ├─ __main__.py           `python -m skilldesk` (src를 경로에 넣었을 때)
 │  ├─ data/
 │  │  ├─ skill_categories.json  카테고리 정의: 이름, 기준 문장(about), 소속 스킬, 새 스킬 분류용 keywords
@@ -120,9 +121,10 @@ skill-manage-viewer/
 │  ├─ test_install.py       install.py 테스트
 │  ├─ test_update.py        skill_update 테스트 (옛 폴더 구조의 설치가 새 구조로 업데이트되는 경우 포함)
 │  ├─ test_update_check.py  update_check 테스트: 버전 비교, 릴리스 응답 검증, 실패 무시, exe·git·ZIP 구분
+│  ├─ test_self_update.py   self_update 테스트: 주소·리다이렉트 허용 목록, 해시 목록 파싱·대조, 크기·시간 제한, 자산 선택, 상태 전이, 실행 인자, macOS 교체 스크립트 (로컬 가짜 서버)
 │  ├─ test_recommend.py     추천 스냅샷: 페이지 파싱·거르기·실패 시 보존(`tools/update_recommend.py`)과 `load_recommended()`
 │  └─ test_usage.py · test_release.py · test_check.py · test_privacy.py   그 밖의 테스트
-├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 · build_exe.py + skilldesk.iss: Windows 설치 파일 · build_mac.py: macOS 앱(dmg) 만들기 (앱은 쓰지 않음; 워크플로가 돌림)
+├─ tools/                   check.py: 푸시 전 확인 한 번에 · update_recommend.py: 추천 스냅샷 다시 만들기 · release.py: 버전·릴리스 노트 · build_exe.py + skilldesk.iss: Windows 설치 파일 · build_mac.py: macOS 앱(dmg) 만들기 · update_e2e.ps1 / update_e2e.sh: PR의 CI에서만 도는 자동 업데이트 실제 시험 (앱은 쓰지 않음; 워크플로가 돌림)
 ├─ docs/
 │  ├─ DEVELOPMENT.md        이 문서
 │  ├─ make_screenshots.py   README 스크린샷 다시 찍기
@@ -350,7 +352,7 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 - **exe 빌드가 실패하면** 릴리스는 초안으로 남고(공개되지 않아 앱의 새 버전 알림에도 안 보입니다), Actions 실행이 실패로 표시됩니다. 원인을 고친 뒤 아래 "이미 있는 태그에 붙이기"로 다시 돌리면 붙이고 공개합니다.
 - **이미 있는 태그에 붙이기**: Actions → Release → Run workflow → 태그 입력(예: `v1.1.0`). 태그의 `VERSION`과 일치해야 하고, 그 태그에 `tools/build_exe.py`가 있어야 합니다(이 기능이 들어간 v1.1.0 이전 태그에는 없어서 실패합니다).
 - **로컬에서 만들기**(Windows): `python -m pip install pyinstaller==6.11.1` 후 `winget install JRSoftware.InnoSetup`, 그리고 `python tools/build_exe.py` (`--app-only`는 PyInstaller만). 결과는 `dist/`(git이 무시합니다).
-- **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe·macOS 앱에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), `update_check`의 알림만 쓰입니다.
+- **exe 안의 경로**: 코드는 `Path(__file__)`을 쓰되 PyInstaller가 `skilldesk/data`, `skilldesk/assets`를 같은 상대 위치에 풀어 두므로 그대로 동작합니다. `VERSION`만 번들 맨 위(`sys._MEIPASS`)에 두고 `update_check.current_version()`이 읽습니다. exe·macOS 앱에서는 git 자동 업데이트가 꺼지고(`skill_update.eligible`), 아래 `self_update`가 대신합니다.
 - **코드 서명은 하지 않습니다.** SmartScreen·백신 경고가 있을 수 있어 README와 릴리스 노트에 안내합니다. 서명하려면 인증서를 사서 `iscc`의 `SignTool`과 PyInstaller 결과 서명을 넣어야 합니다.
 
 ### macOS 설치 파일 (dmg)
@@ -371,8 +373,45 @@ python docs/make_screenshots.py     # Windows에서 실행, docs/images/*.png를
 - **Windows exe는 필수**: 실패하면 공개하지 않고 초안으로 남깁니다.
 - **macOS dmg는 아직 필수가 아님**: 실패해도 공개하되, 릴리스 노트 끝에 "macOS 설치 파일이 없습니다" 안내를 붙입니다(다음 실행에서 dmg가 붙으면 그 안내는 지워집니다). 안정되면 `release.yml`의 `publish` 작업에서 `MAC_REQUIRED: "true"`로 바꾸세요. 그러면 dmg가 없을 때도 초안으로 남습니다.
 - **PR 실행**에서는 `exe`와 `mac` 모두 항상 돌고(관련 파일이 바뀐 PR), 어느 쪽이든 실패하면 PR의 확인이 빨갛게 됩니다. 그래서 머지 전에 잡힙니다. `publish`는 PR에서 돌지 않습니다.
+- **`SHA256SUMS.txt`는 필수**: `publish`의 첫 단계가 릴리스에 붙은 `SkillDesk-*` 파일을 받아 `sha256sum`으로 목록을 만들어 같은 릴리스에 올립니다. Windows 설치 파일이 없거나 이 단계가 하나라도 실패하면 공개하지 않고 초안으로 남깁니다(목록 없는 릴리스를 공개하면 설치된 앱이 자동 업데이트를 못 하고 알림으로 물러서기만 하므로, 막히는 쪽을 택했습니다). 복구는 아래 "이미 있는 태그에 붙이기"로 같은 태그를 다시 돌리는 것입니다.
 - **이미 있는 태그에 붙이기**(Run workflow)도 `exe`·`mac`·`publish`를 모두 돌립니다. 빌드 스크립트가 없는 오래된 태그는 "tools/build_mac.py is missing"처럼 이유를 적고 끝납니다(그 태그의 exe가 만들어지면 mac 없이 공개하고 노트에 안내를 붙입니다).
 - 워크플로 문법은 `ci.yml`의 `workflows` 작업(actionlint)이 PR마다 검사합니다.
+
+### 설치 파일 앱의 자동 업데이트 (`self_update.py`)
+
+exe·dmg로 설치한 앱(`sys.frozen`)은 git이 없으므로 새 **설치 파일을 받아 바꿉니다**. git 클론은 `skill_update.py`, 소스 ZIP과 이 방식을 쓸 수 없는 위치의 설치는 `update_check.py`의 알림만 씁니다. 화면 쪽은 `App.auto_update` → `_self_update` → `_prepared` → `install_update`입니다(진행 중 표시는 `_updating`·`_applying`, 받아 둔 결과는 `App.staged`, 알약은 `새 버전 · 지금 업데이트`). 설정 `auto_update`가 git 설치와 같은 스위치입니다: 꺼져 있으면 내려받지 않고 알림(`받기`)만 만들고, 사용자가 `SkillDesk 업데이트 확인`을 직접 누르면 꺼져 있어도 내려받습니다.
+
+**흐름**
+
+1. `prepare()`(작업 스레드): 릴리스 API → 더 높은 `X.Y.Z`인가 → 이 설치가 스스로 바꿀 수 있는가(`unsupported_reason`: Windows는 설치 폴더에 `unins000.exe`가 있고 쓸 수 있을 것, macOS는 `.app`이 `/Volumes`·AppTranslocation 밖이고 부모 폴더에 쓸 수 있을 것) → 자산 목록에 이 플랫폼의 설치 파일과 `SHA256SUMS.txt`가 있는가 → 임시 폴더 `skilldesk-update-…`에 둘을 받기 → SHA-256 대조 → (macOS) dmg를 `hdiutil attach -nobrowse -readonly`로 열어 `SkillDesk.app`을 임시 폴더로 `ditto`하고 닫은 뒤 번들 ID·버전·`codesign --verify`를 확인. 어느 단계든 막히면 폴더를 지우고 알림으로 물러섭니다.
+2. `Staged("staged")`가 되면 창이 보일 때는 알약, 숨어 있을 때는 바로 `install_update(ask=False)`입니다. 저장하지 않은 SKILL.md 편집이 있으면(`_unsaved_edits`) 자동으로는 하지 않고, 알약을 누르면 `discard_ok()`로 묻습니다.
+3. `apply()`:
+   - **Windows**: 설치 파일의 SHA-256을 다시 확인하고 `SkillDesk-Setup-vX.Y.Z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=… /RELAUNCH=hidden|shown`을 떼어 낸 프로세스로 실행(`shell=False`)한 뒤 앱이 닫힙니다. `AppId`가 같아 같은 폴더에 덮어 설치되고(이미 실행 중이면 `CloseApplications=yes`가 닫습니다), 조용한 설치는 `skipifsilent` 항목을 건너뛰므로 `skilldesk.iss`에 `[Run]` 항목 두 개를 더 두어 `/RELAUNCH` 값(`{param:RELAUNCH|}`)을 `Check: Relaunch(...)`로 읽고 새 버전을 다시 켭니다. **설치 프로그램에 재시작을 맡긴 이유**: PyInstaller 앱에는 설치 폴더 밖에서 돌 수 있는 인터프리터가 없고, 설치 폴더 안의 도우미는 설치가 덮어쓰려는 파일을 붙잡으며, PowerShell 같은 외부 해석기는 정책으로 막힌 PC가 있기 때문입니다. 그 대가로 설치 프로그램이 도중에 실패하면 아무도 앱을 다시 켜 주지 않습니다(아래 "복구").
+   - **macOS**: `/bin/sh`가 `MAC_SCRIPT`(`apply-update.sh`)를 실행합니다. 값(앱 PID, 새 앱, 설치된 앱, 로그, hidden|shown)은 위치 인자로만 넘기고 스크립트 본문에 섞지 않습니다. 앱이 끝나길 기다렸다가(최대 60초) 새 앱을 `….update-new`로 복사 → 옛 앱을 `….update-old`로 옮김 → 새 앱을 제자리로 → 옛 앱 삭제. 실패하면 옛 앱을 되돌리고, 어느 쪽이든 `open`으로 앱을 다시 엽니다.
+   - 시작에 성공하면 `~/.skill-manager/update-attempt.json`에 `{from, to}`를 적습니다. 같은 `to`가 같은 `from` 그대로 남아 있으면(설치가 끝나지 않음) 그 버전은 저절로 다시 시도하지 않고 알림으로 물러섭니다. 직접 `업데이트 확인`을 누르거나 더 새 릴리스가 나오면 다시 시도합니다.
+4. 앱을 켠 뒤 첫 확인에서 `skilldesk-update-*` 폴더를 모두 지우고, 이후에는 1시간 지난 것을 지웁니다.
+
+**보안: 한 일과 못 하는 일**
+
+- 응답은 믿지 않습니다. 릴리스 응답에서는 태그(`vX.Y.Z`)와 자산 *이름*만 읽고, 받을 주소와 파일 이름은 앱이 태그로 직접 만듭니다(`browser_download_url`은 읽지 않습니다). `https://github.com/<공식 저장소>/releases/download/v…`만 받고, 리다이렉트는 한 단계마다 `objects.githubusercontent.com`·`release-assets.githubusercontent.com`인지 확인합니다. 200MB(목록은 64KB)·연결 20초·전체 10분 제한. 해시 목록 형식이 이상하거나 같은 파일이 다른 값으로 두 번 나오면 통째로 버립니다.
+- 받은 파일은 **검증 전에 실행하지 않습니다.** 실행하는 것은 임시 폴더 안의 검증된 파일 하나이고, 인자는 고정이며 사용자나 서버가 준 문자열은 인자에도 셸에도 들어가지 않습니다.
+- **한계**: 이것은 전송 중 손상·변조, 엉뚱한 주소로의 유도, 응답 형식 속임을 막을 뿐입니다. 코드 서명이 없고 `SHA256SUMS.txt`가 설치 파일과 같은 릴리스에 있으므로, 저장소나 릴리스에 쓸 수 있는 사람이 침해되면 설치 파일과 목록을 함께 바꿔 올릴 수 있고 앱은 막지 못합니다. 더 막으려면 Windows Authenticode·Apple Developer ID로 서명하거나, 앱에 공개키를 넣어 목록에 분리 서명을 붙여야 합니다.
+- 앱이 받은 파일에는 "인터넷에서 받음"(Windows Mark-of-the-Web)·격리(macOS quarantine) 표시가 붙지 않아 SmartScreen·Gatekeeper가 뜨지 않습니다. 그 몫을 해시 확인이 합니다. macOS는 임시(ad-hoc) 서명이 빌드마다 달라 TCC(파일·폴더 접근) 허용을 버전마다 다시 물을 수 있습니다.
+- 검증과 실행 사이에 같은 사용자 권한의 프로그램이 임시 파일을 바꿀 수 있지만, 그런 프로그램은 앱 폴더도 바꿀 수 있어 막을 대상이 아닙니다. Windows는 실행 직전에 해시를 한 번 더 봅니다.
+
+**시험**
+
+- 단위 테스트 `tests/test_self_update.py`(로컬 가짜 서버)와 `test_viewer`의 `test_03i2b…d`(알약·숨김·저장 안 한 편집·실패 시 물러서기).
+- PR의 CI에서만, `exe` 작업이 `tools/update_e2e.ps1`로 **실제 제자리 업그레이드**를 시험합니다: 설치 파일을 `--version 0.0.1`로 한 번 더 만들어 설치 → 가짜 GitHub(로컬 `http.server`, 환경 변수 `SKILLDESK_UPDATE_TEST_ORIGIN`)를 가리키게 하고 `--hidden`으로 시작 → 앱이 스스로 받아 바꾸고 새 버전이 숨은 채로 다시 켜지는지 확인, 그다음 해시를 틀리게 해서 아무것도 실행되지 않고 옛 앱이 계속 도는지 확인. `mac` 작업은 같은 시험을 `tools/update_e2e.sh`로 합니다. `publish`에는 영향을 주지 않으므로 릴리스(push)에서는 돌지 않습니다.
+- `SKILLDESK_UPDATE_TEST_ORIGIN`은 `http://127.0.0.1:포트`(또는 localhost)일 때만 받아들입니다. 그 환경 변수를 정할 수 있는 쪽은 이미 같은 사용자 권한이라, 이 시험 장치가 새 공격 경로를 열지는 않습니다.
+
+**복구**
+
+- Windows 설치가 도중에 실패해 앱이 안 켜지면: 시작 메뉴의 SkillDesk를 다시 켜 보고, 안 되면 릴리스의 설치 파일을 직접 실행해 덮어 설치합니다. 원인은 `~/.skill-manager/update-setup.log`(Inno Setup 기록)에 있습니다.
+- macOS: `~/.skill-manager/update-apply.log`. 임시 파일이 남았다면 `/Applications/SkillDesk.app.update-old`가 옛 앱입니다.
+- 자동 업데이트를 못 하는 환경이 있으면 설정에서 끄면 알림(`받기`)만 남습니다.
+
+**확인하지 못한 것**: 실제 Mac(위의 모든 macOS 동작은 CI의 `macos-latest`뿐), 깨끗한 PC·여러 사용자·한글 사용자 폴더에서의 설치, 백신·SmartScreen의 반응(앱이 받은 설치 파일을 백신이 막는 경우), 설치가 도중에 실패했을 때의 상태(재현하지 않았습니다. 위 복구 안내는 설계에서 나온 것입니다).
 
 ## 알려진 한계
 

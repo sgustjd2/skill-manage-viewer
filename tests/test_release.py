@@ -38,6 +38,8 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("/releases/download/v1.3.0/SkillDesk-v1.3.0-macOS-arm64.dmg", text)  # the dmg, named as build_mac.py names it
         self.assertIn("Intel Mac", text)  # and that it is Apple silicon only
         self.assertIn("xattr -dr com.apple.quarantine", text)  # and how to get past Gatekeeper
+        self.assertIn("스스로 내려받아 바꾸고 다시 켭니다", text)  # the installed apps update themselves ...
+        self.assertIn("Applications 폴더에 있을 때만", text)  # ... on macOS only from there
 
     def test_the_first_release_has_no_list(self):
         text = release.notes_md("1.0.0", None, [])
