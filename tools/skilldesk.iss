@@ -42,3 +42,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\SkillDesk.exe"; Description: "SkillDesk 실행"; Flags: nowait postinstall skipifsilent
+; A silent upgrade started by the app itself (self_update.py passes /RELAUNCH=hidden or =shown) starts the new version again; a silent Setup skips the box above.
+Filename: "{app}\SkillDesk.exe"; Parameters: "--hidden"; Flags: nowait runasoriginaluser; Check: Relaunch('hidden')
+Filename: "{app}\SkillDesk.exe"; Flags: nowait runasoriginaluser; Check: Relaunch('shown')
+
+[Code]
+function Relaunch(Mode: String): Boolean;
+begin
+  Result := CompareText(ExpandConstant('{param:RELAUNCH|}'), Mode) = 0;
+end;

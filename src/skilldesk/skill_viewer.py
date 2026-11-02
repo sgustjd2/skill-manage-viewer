@@ -32,6 +32,7 @@ from . import platform_support as plat
 from . import skill_agent
 from . import skill_harness as hn
 from . import skill_manager as mgr
+from . import self_update as su
 from . import skill_usage as usage
 from . import skill_update as upd
 from . import update_check as uc
@@ -367,6 +368,10 @@ class App:
         self.restart_pill: tk.Label | None = None
         self.new_release: str | None = None  # exe / ZIP installs: a newer release exists (update_check.py); the pill opens its page
         self.release_pill: tk.Label | None = None
+        self.staged: su.Staged | None = None  # exe / dmg installs: the new version, downloaded and verified (self_update.py)
+        self.update_pill: tk.Label | None = None
+        self._updating = False  # a check / download is running; a second one must not start
+        self._applying = False
         self._failed_update = ""  # the version whose update failed, so it is reported once, not every few hours
         self._say_job = None
         self._build()
@@ -560,6 +565,7 @@ class App:
         self.canvas, self.body = self.list.canvas, self.list.body
         self._show_restart_pill()  # a theme switch rebuilds the header; keep the pill if an update is waiting
         self._show_release_pill()
+        self._show_update_pill()
 
     def _wheel(self, e) -> None:
         try:
@@ -1113,11 +1119,15 @@ class App:
 
     # ---- updates ----------------------------------------------------------------------------
     def check_updates(self, repos: list[Path] | None = None) -> None:
-        check_app = repos is None and uc.applies()  # the button also asks about SkillDesk itself when git cannot update it
+        # the button also asks about SkillDesk itself when git cannot update it (an exe / dmg install updates itself, below)
+        check_app = repos is None and uc.applies() and not su.supported()
+        if repos is None and su.supported():  # an exe / dmg install updates itself: the button is one more way to ask for that
+            self._self_update(manual=True)
         if repos is None:
             repos = sorted({s["repo"] for skills in self.data.values() for s in skills if s["repo"]}, key=str)
         if not repos and not check_app:
-            self.say("업데이트를 확인할 git 스킬이 없습니다")
+            if not su.supported():
+                self.say("업데이트를 확인할 git 스킬이 없습니다")
             return
         self.say(f"업데이트 확인 중… ({len(repos)}개 저장소)" if repos else "SkillDesk 업데이트 확인 중…", ms=60_000)
 
@@ -1251,9 +1261,12 @@ class App:
         Runs again every 6 hours by itself; manual=True (the tray item) also reports "already up to date" and why not."""
         if not manual:
             self.root.after(6 * 3600 * 1000, self.auto_update)
-            if not mgr.load_settings().get("auto_update", True):
+            if not mgr.load_settings().get("auto_update", True) and not su.supported():
                 return
-        if uc.applies():  # the exe or a ZIP copy: git cannot update it, so only tell the user a newer release exists
+        if su.supported():  # the exe / dmg install: download, verify and apply the new installer (or, with the switch off, only tell)
+            self._self_update(manual)
+            return
+        if uc.applies():  # a ZIP copy: git cannot update it, so only tell the user a newer release exists
             self.bg(uc.release_state, lambda st: self._release_found(st, manual))
             return
         if self.pending_restart:  # the new code is already on disk; asking GitHub again would only repeat it
@@ -1292,6 +1305,79 @@ class App:
         elif manual and res.status in ("up-to-date", "skipped"):
             self.say("SkillDesk는 최신 버전입니다" if res.status == "up-to-date" else res.detail, ms=8000)
 
+    def _self_update(self, manual: bool) -> None:
+        """exe / dmg install: fetch the new installer in the background and check it (self_update.prepare). With the switch off
+        only the notice is made, unless the user asked."""
+        if self.staged:  # already downloaded and verified: asking GitHub again would only repeat it
+            if manual:
+                self.say("이미 새 버전을 받아 두었습니다. 위쪽의 '지금 업데이트'를 누르세요", ms=6000)
+            elif not self.visible:
+                self.install_update(ask=False)
+            return
+        if self._updating or self._applying:
+            if manual:
+                self.say("SkillDesk 업데이트를 확인하고 있습니다…", ms=6000)
+            return
+        self._updating = True
+        if manual:
+            self.say("SkillDesk 업데이트 확인 중…", ms=60_000)
+        download = manual or mgr.load_settings().get("auto_update", True)
+        self.bg(lambda: su.prepare(download, manual), lambda res: self._prepared(res, manual))
+
+    def _prepared(self, res, manual: bool = False) -> None:
+        self._updating = False
+        if isinstance(res, Exception):
+            res = su.Staged("failed", detail=str(res))
+        if res.status == "staged":
+            self.staged = res
+            self.new_release = None  # the pill below replaces the 'download it yourself' one
+            if self.release_pill:
+                self.release_pill.destroy()
+                self.release_pill = None
+            self._show_update_pill()
+            if self.visible or self._unsaved_edits():  # the user decides when; SKILL.md edits are never cut off
+                self.say(f"SkillDesk {res.version} 버전을 받아 두었습니다. 위쪽의 '지금 업데이트'를 누르면 바뀝니다", ms=10_000)
+            else:
+                self.install_update(ask=False)  # nobody is looking at the window: switch right away
+        elif res.status == "up-to-date":
+            if manual:
+                self.say("SkillDesk는 최신 버전입니다", ms=8000)
+        else:  # notice | failed: a newer release exists but this install cannot take it by itself: the old pill that opens the page
+            if res.status == "failed" and (manual or res.version != self._failed_update):
+                self._failed_update = res.version
+                self.say(res.detail, warn=True, ms=10_000)
+            elif res.status == "notice" and res.detail and (manual or res.version != self._failed_update):
+                self._failed_update = res.version
+                self.say(res.detail, ms=10_000)
+            if res.version:
+                self.new_release = res.version
+                self._show_release_pill()
+
+    def _unsaved_edits(self) -> bool:
+        return bool(self.detail_win and self.detail_win.win.winfo_exists() and self.detail_win.dirty())
+
+    def install_update(self, ask: bool = True) -> None:
+        """Start the downloaded installer / script and close this window; it starts the new version when it is done."""
+        if not self.staged or self._applying:
+            return
+        if self._unsaved_edits() and (not ask or not self.detail_win.discard_ok()):  # type: ignore[union-attr]
+            return
+        self._applying = True
+        try:
+            su.apply(self.staged, hidden=not self.visible)
+        except su.UpdateError as e:
+            self._applying = False
+            version, self.staged = self.staged.version, None
+            if self.update_pill:
+                self.update_pill.destroy()
+                self.update_pill = None
+            self._failed_update = version
+            self.say(f"업데이트를 시작하지 못했습니다: {e}", warn=True, ms=10_000)
+            self.new_release = version
+            self._show_release_pill()
+            return
+        self.quit()
+
     def _release_note(self, state, manual: bool) -> str | None:
         """Shows the pill for a newer release and returns the sentence to say, or None when nothing should be said."""
         status, version = state if isinstance(state, tuple) else ("failed", None)  # a crashed worker is a failed check
@@ -1326,6 +1412,11 @@ class App:
         if not self.new_release or (self.release_pill and self.release_pill.winfo_exists()):
             return
         self.release_pill = self._header_pill(f"새 버전 {self.new_release} · 받기", self.open_release)
+
+    def _show_update_pill(self) -> None:
+        if not self.staged or (self.update_pill and self.update_pill.winfo_exists()):
+            return
+        self.update_pill = self._header_pill("새 버전 · 지금 업데이트", self.install_update)
 
     def open_release(self) -> None:
         """The click is the user's go-ahead: open the release page in the browser (nothing is downloaded or run by the app)."""

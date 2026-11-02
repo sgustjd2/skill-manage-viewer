@@ -3,6 +3,9 @@ name: Release
 # Every push to main: if the commits since the last tag call for a new version, bump VERSION, tag it and publish a release,
 # then build the Windows installer (exe job) and the macOS app (mac job) from that tag, attach them and only then publish
 # the release (publish job; it is a draft until then). The exe is required, the dmg is not (see the publish job).
+# The publish job also lists the SHA-256 of every attached installer in SHA256SUMS.txt: installed apps update themselves
+# from these files and refuse a download that does not match. That list is required: without it the release stays a draft
+# ("Run workflow" with the tag makes it again).
 # A pull request only builds and tests both (nothing is published). "Run workflow" builds both for a tag that already
 # exists and attaches them to that release (the tag must contain tools/build_exe.py, i.e. be v1.1.0 or later;
 # tools/build_mac.py for the macOS app).
@@ -121,6 +124,13 @@ jobs:
           name: SkillDesk-Setup
           path: dist/SkillDesk-Setup-v*.exe
           retention-days: 3
+      - name: Update test (an installed older version upgrades itself from a fake release server)
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION).Trim()
+          python tools/build_exe.py --version 0.0.1
+          ./tools/update_e2e.ps1 -Old dist/SkillDesk-Setup-v0.0.1.exe -OldVersion 0.0.1 -New "dist/SkillDesk-Setup-v$v.exe" -NewVersion $v
       - name: Attach the installer to the release
         if: env.TAG != ''
         env:
@@ -190,6 +200,12 @@ jobs:
           name: SkillDesk-macOS
           path: dist/SkillDesk-v*-macOS-*.dmg
           retention-days: 3
+      - name: Update test (an installed older version upgrades itself from a fake release server)
+        if: github.event_name == 'pull_request'
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          python tools/build_mac.py --version 0.0.1
+          bash tools/update_e2e.sh dist/SkillDesk-v0.0.1-macOS-*.dmg 0.0.1 dist/SkillDesk-v"$v"-macOS-*.dmg "$v"
       - name: Attach the dmg to the release
         if: env.TAG != ''
         env:
@@ -209,6 +225,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - name: List the SHA-256 of the installers (required, the apps verify their updates with it)
+        run: |
+          mkdir assets
+          gh release download "$TAG" --pattern 'SkillDesk-*' --dir assets
+          ls assets/SkillDesk-Setup-v*.exe > /dev/null || { echo "::error::the Windows installer is not attached to $TAG"; exit 1; }
+          (cd assets && sha256sum SkillDesk-*) > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber
       - name: Publish the release (it was a draft, so nobody saw it before its installers were attached)
         run: |
           if [ "$MAC" != success ] && [ "$MAC_REQUIRED" = true ]; then

@@ -29,7 +29,8 @@ INSTALL = """
 Python과 Git 없이 쓸 수 있습니다. [SkillDesk-Setup-v{version}.exe][exe]를 받아 실행하세요.
 
 - 서명하지 않은 파일이라 Windows SmartScreen이 "PC를 보호했습니다"라고 할 수 있습니다. **추가 정보 → 실행**을 누르세요.
-- 새 버전이 나오면 앱 위쪽에 알림이 뜹니다. 눌러서 새 설치 파일을 받아 다시 실행하면 됩니다.
+- 새 버전이 나오면 앱이 스스로 내려받아 바꾸고 다시 켭니다(설정에서 끌 수 있습니다).
+  자동 업데이트가 들어가기 전의 옛 버전을 쓰고 있다면 한 번은 이 파일로 직접 덮어 설치해야 합니다.
 
 **macOS: 설치 파일** (Apple 칩 Mac, M1 이후)
 
@@ -40,7 +41,8 @@ Python과 Git 없이 쓸 수 있습니다. [SkillDesk-v{version}-macOS-arm64.dmg
   macOS 14 이하는 Finder에서 SkillDesk를 **우클릭 → 열기**,
   macOS 15 이상은 시스템 설정 → 개인정보 보호 및 보안에서 **그래도 열기**를 누르세요.
   그래도 안 열리면 터미널에서 `xattr -dr com.apple.quarantine /Applications/SkillDesk.app`을 실행하세요.
-- 새 버전 알림은 Windows와 같습니다. 눌러서 새 dmg를 받아 덮어 넣으면 됩니다.
+- 새 버전이 나오면 Windows와 같이 앱이 스스로 내려받아 바꾸고 다시 켭니다.
+  SkillDesk가 Applications 폴더에 있을 때만 됩니다(dmg에서 바로 열었다면 알림만 뜹니다). 옛 버전은 한 번 직접 덮어 넣어야 합니다.
 
 **소스로 설치** (Intel Mac, 또는 직접 받고 싶을 때): Python 3.12 이상과 Git이 필요합니다. 자세한 안내는 [README][readme]를 보세요.
 
