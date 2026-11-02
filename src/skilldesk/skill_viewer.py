@@ -51,7 +51,9 @@ OTHER = "기타"
 STAR = "★ 자주 쓰는 스킬"  # rail entry listing what the user starred, separately for each agent
 USAGE = "많이 쓴 스킬"  # Claude Code only: skills ranked by how often they were called in a month
 IDLE = "정리 후보"  # Claude Code only, last in the rail: skills not called for two months, to tick and delete
+PLUGINS = "플러그인"  # Claude Code only: the installed plugins themselves (read-only); a row jumps to that plugin's skills
 ABOUT = {c["name"]: c["about"] for c in CATALOG} | {
+    PLUGINS: "설치한 Claude Code 플러그인, 누르면 그 플러그인의 스킬을 봅니다",
     OTHER: "어느 카테고리에도 맞지 않는 스킬",
     STAR: "☆를 눌러 지정한 스킬만 모아 봅니다",
     USAGE: "Claude Code 대화 기록에서 스킬을 부른 횟수, 많은 순",
@@ -75,6 +77,7 @@ CAT_COLORS = {
 # The star entry is not a category, so its colors stay out of CAT_COLORS (a test pairs that with skill_categories.json).
 STAR_COLORS = ("#854F0B", "#FAEEDA", "#EF9F27", "#3F2A0A")
 USAGE_COLORS = ("#0B6380", "#DCF0F7", "#67C7EB", "#123845")
+PLUGINS_COLORS = ("#6D3FC0", "#EDE5FA", "#C3A6F5", "#35264F")
 IDLE_COLORS = ("#475569", "#E8ECF1", "#B6C2D2", "#2C3542")  # slate: neutral, nothing to be alarmed about until the user ticks something
 
 LIGHT = dict(bg="#F4F6F9", surface="#FFFFFF", rail="#EBEFF5", line="#CBD3DE", text="#0F172A", muted="#475569",
@@ -349,6 +352,7 @@ class App:
         self.icons: dict[str, list[tk.Label]] = {}  # the ☆/★ labels on screen for each skill name (it can be in two groups)
         self.updatable: set[Path] = set()
         self.data: dict[str, list[dict]] = {}
+        self.plugins: list[dict] = []  # installed Claude Code plugins, read in load()
         self.agents = mgr.chosen_agents()  # tabs shown; set in the settings dialog
         self.agent = tk.StringVar(value=self.agents[0])
         self.query = tk.StringVar()
@@ -392,7 +396,7 @@ class App:
         """(text color, tint) for a category; None (= all) uses the app accent."""
         if cat is None:
             return self.c["accent"], self.c["soft"]
-        special = {STAR: STAR_COLORS, USAGE: USAGE_COLORS, IDLE: IDLE_COLORS}
+        special = {STAR: STAR_COLORS, USAGE: USAGE_COLORS, IDLE: IDLE_COLORS, PLUGINS: PLUGINS_COLORS}
         fg_l, soft_l, fg_d, soft_d = special.get(cat) or CAT_COLORS[cat]
         return (fg_d, soft_d) if self.theme == "dark" else (fg_l, soft_l)
 
@@ -605,8 +609,9 @@ class App:
     def load(self) -> None:
         mgr.version.cache_clear()
         data = {a: collect(a) for a in self.agents}
-        if data != self.data:  # rescanning is cheap; redrawing is not, and would also reset what the user is reading
-            self.data = data
+        plugins = mgr.list_plugins()
+        if (data, plugins) != (self.data, self.plugins):  # rescanning is cheap; redrawing is not (it resets what the user reads)
+            self.data, self.plugins = data, plugins
             self.render()
 
     def set_agent(self, name: str) -> None:
@@ -686,21 +691,24 @@ class App:
         idle_all = self._idle(everything) if claude else []  # not narrowed by the search: what is ticked must outlive a search
         shown_names = {s["name"] for s in found}
         idle = [s for s in idle_all if s["name"] in shown_names]
-        if self.cat not in counts and self.cat not in (STAR, USAGE, IDLE) or (self.cat in (USAGE, IDLE) and not claude):
+        plugins = [p for p in self.plugins if q in p["name"].lower()] if claude else []
+        if self.cat not in counts and self.cat not in (STAR, USAGE, IDLE, PLUGINS) or (self.cat in (USAGE, IDLE, PLUGINS) and not claude):
             self.cat = None  # the picked category vanished (search, refresh or another agent)
-        self.shown = starred if self.cat == STAR else used if self.cat == USAGE else idle if self.cat == IDLE else [
-            s for s in found if self.cat in (None, s["cat"])]
+        self.shown = starred if self.cat == STAR else used if self.cat == USAGE else idle if self.cat == IDLE else plugins if (
+            self.cat == PLUGINS) else [s for s in found if self.cat in (None, s["cat"])]
         self.checked &= {s["name"] for s in idle_all if s["managed"]}  # ticked, but gone or no longer idle: not ticked any more
         self._restyle_tabs(agent, {a: f"{a}  {len(self.data.get(a, []))}" for a in self.agents})
         self.subtitle.config(text=f"{agent}에서 사용할 수 있는 스킬")
         idle_count = None if not claude else "–" if self.usage is None else len(idle)  # "–": the logs are counted on the first visit
-        self._draw_rail(counts, len(found), len(starred), len(used) if claude else None, idle_count)
-        self.count.config(text=f"{len(self.shown)}개 스킬" + (f" · '{q}' 검색 결과" if q else ""))
+        self._draw_rail(counts, len(found), len(starred), len(used) if claude else None, idle_count,
+                        len(self.plugins) if claude else None)
+        unit = "플러그인" if self.cat == PLUGINS else "스킬"
+        self.count.config(text=f"{len(self.shown)}개 {unit}" + (f" · '{q}' 검색 결과" if q else ""))
         if rebuild or not self.shown:  # data, agent, search or theme changed (or only the empty note is up): groups are stale
             self.list.clear()
             self.sections, self.icons, self.checks = {}, {}, {}
         groups = [(STAR, self.shown)] if self.cat == STAR else [(USAGE, self.shown)] if self.cat == USAGE else [
-            (IDLE, self.shown)] if self.cat == IDLE else [
+            (IDLE, self.shown)] if self.cat == IDLE else [(PLUGINS, self.shown)] if self.cat == PLUGINS else [
             (cat, [s for s in self.shown if s["cat"] == cat]) for cat in [n for n, _ in CATEGORIES] + [OTHER]
         ]
         wanted = [self._group(cat, items) for cat, items in groups if items]
@@ -721,6 +729,8 @@ class App:
         if not self.shown:
             msg = ("일치하는 스킬이 없습니다" if everything else
                    f"{agent}에 설치된 스킬이 없습니다.\n\n{mgr.AGENT_DIRS[agent]}\n\n위의 ＋ 추가에서 설치할 수 있습니다.")
+            if self.cat == PLUGINS:
+                msg = "일치하는 플러그인이 없습니다" if self.plugins else "설치한 플러그인이 없습니다"
             if self.cat == STAR and everything and not q:
                 msg = "아직 지정한 스킬이 없습니다\n\n스킬 이름 앞의 ☆를 눌러\n자주 쓰는 스킬로 지정하세요."
             if self.cat == USAGE and everything:
@@ -741,14 +751,16 @@ class App:
         if top:
             self.canvas.yview_moveto(0)
 
-    def _draw_rail(self, counts: Counter, total: int, starred: int, used: int | None = None, idle: int | str | None = None) -> None:
+    def _draw_rail(self, counts: Counter, total: int, starred: int, used: int | None = None, idle: int | str | None = None,
+                   plugins: int | None = None) -> None:
         c = self.c
         for w in self.rail.winfo_children():
             w.destroy()
         self._label(self.rail, "카테고리", 10, fg=c["muted"], bg=c["rail"], anchor="w", padx=16, pady=10).pack(fill="x")
         # the star entry is always there, even at 0, so the feature can be found
         top = [(STAR, starred)] + ([(USAGE, used)] if used is not None else []) + [(None, total)]
-        bottom = [(IDLE, idle)] if idle is not None else []  # the cleanup entry is the last one, after every category
+        bottom = ([(PLUGINS, plugins)] if plugins is not None else []) + (
+            [(IDLE, idle)] if idle is not None else [])  # the cleanup entry is the last one, after every category
         for cat, n in top + [(k, counts[k]) for k in [n for n, _ in CATEGORIES] + [OTHER] if counts[k]] + bottom:
             fg, soft = self.cat_colors(cat)
             on = cat == self.cat
@@ -777,9 +789,41 @@ class App:
                 self._idle_head(g)
             now = datetime.now()
             for s in items:
+                if cat == PLUGINS:
+                    self._plugin_row(g, s)
+                    continue
                 self._row(g, s, show_cat=cat in (STAR, USAGE, IDLE), calls=self.calls.get(s["name"]) if cat == USAGE else None,
                           idle=idle_label(self.idle_last.get(s["name"]), now) if cat == IDLE else None)
         return self.sections[cat]
+
+    def _plugin_row(self, parent, p: dict) -> None:
+        """A read-only plugin line; a click lists that plugin's skills (their names start with 'plugin:')."""
+        c = self.c
+        fg, _ = self.cat_colors(PLUGINS)
+        wrap = tk.Frame(parent, bg=c["surface"], cursor="hand2")
+        wrap.pack(fill="x")
+        tk.Frame(wrap, width=self.px(6), bg=fg).pack(side="left", fill="y")
+        f = tk.Frame(wrap, bg=c["surface"], cursor="hand2")
+        f.pack(side="left", fill="x", expand=True)
+        top = tk.Frame(f, bg=c["surface"])
+        top.pack(fill="x", padx=(14, 12), pady=(9, 0))
+        on = p["enabled"]
+        self._label(top, "켜짐" if on else "꺼짐", 9, bold=on, fg=c["on_accent"] if on else c["muted"],
+                    bg=c["accent"] if on else c["rail"], padx=7).pack(side="right")
+        self._label(top, f"스킬 {p['skills']}개", 10, fg=c["muted"]).pack(side="right", padx=10)
+        self._label(top, f"v{p['version']}", 10, fg=c["muted"]).pack(side="right")
+        self._label(top, self._fit(p["name"], self.px(self.W - self.RAIL - 260)), 11, bold=True, anchor="w").pack(side="left")
+        self._label(f, str(p["path"]), 9, fg=c["muted"], anchor="w").pack(fill="x", padx=(14, 12), pady=(2, 9))
+        tk.Frame(parent, height=1, bg=c["line"]).pack(fill="x")
+        for w in (wrap, f, top, *f.winfo_children(), *top.winfo_children()):
+            w.bind("<Button-1>", lambda e, n=p["name"]: self.show_plugin_skills(n))
+
+    def show_plugin_skills(self, name: str) -> None:
+        self.cat = None
+        same = self.query.get() == name + ":"
+        self.query.set(name + ":")  # the search box then shows exactly that plugin's skills
+        if same:  # no change, no trace: draw the skill list ourselves
+            self.render(top=True)
 
     def _section(self, parent, cat: str, n: int) -> None:
         fg, soft = self.cat_colors(cat)
