@@ -27,6 +27,7 @@ from skilldesk import platform_support as plat
 from skilldesk import skill_agent
 from skilldesk import skill_harness as hn
 from skilldesk import skill_manager as mgr
+from skilldesk import update_check as uc
 from skilldesk import skill_update as upd
 from skilldesk import skill_viewer as v
 
@@ -283,6 +284,10 @@ class PanelTest(unittest.TestCase):
         self.shot(app.root, "t3_list")
         app.copy("grilling")
         self.assertEqual(app.root.clipboard_get(), "grilling")
+
+    def test_03_version_is_shown_under_the_title(self):
+        shown = texts(self.app.root)
+        self.assertIn(f"버전 v{uc.current_version()}", shown)  # VERSION is in the repo, so a source run always has one
 
     def test_03a_every_category_has_its_own_color(self):
         app = self.app
