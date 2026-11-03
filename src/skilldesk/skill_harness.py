@@ -47,6 +47,15 @@ DEFAULT_FILES = {
 }
 
 
+# Starting sets for someone using the harness the first time. Only public skill names (no one's own PC); a skill that
+# is not installed shows as "설치되어 있지 않음" and is skipped on apply. Made once, then ordinary sets the user can edit.
+EXAMPLE_SETS = {
+    "기본 개발": ["brainstorming", "writing-plans", "tdd", "systematic-debugging", "verification-before-completion"],
+    "리뷰·검증": ["requesting-code-review", "receiving-code-review", "verification-before-completion"],
+    "문서 작업": ["docx", "pdf", "pptx"],
+}
+
+
 def _file() -> Path:
     return mgr.STORE / "harness.json"
 
@@ -75,7 +84,8 @@ def load() -> dict:
         projects[path] = {**v, "set": chosen, "targets": targets or list(PROJECT_DIRS)[:1], "links": links, "exclude": exclude}
     d = raw.get("defaults")
     defaults = {k: v for k, v in (d if isinstance(d, dict) else {}).items() if k in DEFAULT_FILES and isinstance(v, str)}
-    return {"version": VERSION, "sets": sets, "projects": projects, "defaults": defaults}
+    return {"version": VERSION, "sets": sets, "projects": projects, "defaults": defaults,
+            "examples_made": bool(raw.get("examples_made"))}
 
 
 def save(data: dict) -> None:
@@ -93,6 +103,17 @@ def save_set(name: str, skills: list[str]) -> None:
         raise ManagerError(f"스킬 이름으로 쓸 수 없습니다: {bad[0]}")
     data = load()
     data["sets"][name] = {**data["sets"].get(name, {}), "skills": list(dict.fromkeys(skills))}
+    save(data)
+
+
+def ensure_examples() -> None:
+    """First use only: add EXAMPLE_SETS when there is no set yet. The flag stays, so deleted examples never come back."""
+    data = load()
+    if data["examples_made"]:
+        return
+    if not data["sets"]:
+        data["sets"] = {n: {"skills": list(s)} for n, s in EXAMPLE_SETS.items()}
+    data["examples_made"] = True
     save(data)
 
 
