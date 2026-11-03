@@ -244,7 +244,8 @@ def sweep(older_than: float = SWEEP_AFTER) -> None:
     now = time.time()
     for d in Path(tempfile.gettempdir()).glob(f"{STAGE_PREFIX}*"):
         try:
-            if d.is_dir() and now - d.stat().st_mtime >= older_than:
+            # older_than 0 means all: a folder's time can be a few ms ahead of the clock, which made 'now - mtime' negative
+            if d.is_dir() and (older_than <= 0 or now - d.stat().st_mtime >= older_than):
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:
             pass
