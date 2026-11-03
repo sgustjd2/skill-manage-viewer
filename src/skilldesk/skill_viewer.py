@@ -518,6 +518,8 @@ class App:
         self._label(titles, "SkillDesk", 16, bold=True).pack(anchor="w")
         self.subtitle = self._label(titles, "", 10, fg=c["muted"])
         self.subtitle.pack(anchor="w")
+        if uc.current_version():  # unknown (no VERSION file) shows nothing rather than a made-up number
+            self._label(titles, f"버전 v{uc.current_version()}", 9, fg=c["muted"]).pack(anchor="w")
         actions = self.actions = tk.Frame(header, bg=c["surface"])
         actions.pack(side="right", padx=(0, 8))
         # created before self.footer exists; the hint handlers only touch it when the pointer is over a button
