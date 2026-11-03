@@ -200,8 +200,8 @@ python -m unittest tests.test_viewer.PanelTest.test_03_tabs_search_rail -v   # �
 ```
 
 - 테스트는 **임시 폴더만** 씁니다. `mgr.STORE`, `mgr.AGENT_DIRS` 등을 바꿔 끼워서 실제 `~/.claude`, `~/.codex`, `~/.skill-manager`에는 쓰지 않습니다.
-- `test_viewer`는 실제로 창을 띄웠다 닫습니다. 실행 중에는 화면이 잠깐 깜빡이고, 마우스를 움직이지 않는 편이 좋습니다. 키보드·마우스 입력을 흉내 내지 않고 코드로만 조작합니다.
-- Windows에서는 `%TEMP%`에 확인용 스크린샷(`t3_list.png` 등)도 남깁니다.
+- `test_viewer`는 실제로 창을 띄웠다 닫습니다. **Windows 로컬에서는 보이지 않는 별도 데스크톱(`CreateDesktopW`)에서 돌아 화면에 안 뜨고 포커스도 안 뺏습니다.** 눈으로 보려면 `SKILLDESK_TEST_VISIBLE=1`을 붙입니다. CI(`CI` 환경변수)와 macOS는 숨기지 않고 예전처럼 돕니다. 숨은 데스크톱에서는 트레이 아이콘과 스크린샷 저장을 건너뜁니다(`platform_support.TEST_DESKTOP_HIDDEN`). 키보드·마우스 입력을 흉내 내지 않고 코드로만 조작합니다.
+- Windows에서 `SKILLDESK_TEST_VISIBLE=1`일 때만 `%TEMP%`에 확인용 스크린샷(`t3_list.png` 등)도 남깁니다.
 
 | 파일 | 확인하는 것 |
 |---|---|

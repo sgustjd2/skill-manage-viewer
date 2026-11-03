@@ -10,6 +10,7 @@
 - **확인은 요약 출력으로.**
   - 수정하는 동안: `python tools/check.py fast` (창이 뜨지 않는 테스트만, 약 30초)
   - 한 테스트만: `python -m unittest tests.test_viewer.PanelTest.test_03_tabs_search_rail`
+  - Windows에서 창 테스트는 숨은 데스크톱에서 돌아 화면에 안 뜹니다. 보려면 `SKILLDESK_TEST_VISIBLE=1`.
   - 푸시 직전 한 번: `python tools/check.py` (린트·타입·전체 테스트, 통과하면 단계마다 한 줄, 실패하면 실패 부분만)
 - **CI 실패 로그는 실패 부분만:** `gh run view <번호> --log-failed | grep -A15 -E "^(FAIL|ERROR)"`
 - **이미지는 꼭 필요할 때만.** 화면을 바꿨을 때만 `python docs/make_screenshots.py`를 실행하고, 바뀐 이미지만 엽니다.
