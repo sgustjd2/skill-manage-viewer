@@ -1962,6 +1962,7 @@ class HarnessWindow:
         self.skill_vars: dict[str, tk.BooleanVar] = {}
         self.target_vars: dict[str, tk.BooleanVar] = {}
         self.exclude_var, self.exclude_for = tk.BooleanVar(), None
+        hn.ensure_examples()
         self.data = hn.load()
 
         head = tk.Frame(win, bg=c["surface"])
@@ -2051,6 +2052,11 @@ class HarnessWindow:
         if entry is None:
             app._label(self.right, "프로젝트를 추가하면 여기서 세트를 고르고 연결할 수 있습니다.", 11, fg=c["muted"], bg=c["bg"],
                        anchor="w").pack(fill="x", pady=8)
+            if self.data["sets"]:
+                lines = [f"· {n}: {', '.join(v['skills']) or '비어 있음'}" for n, v in self.data["sets"].items()]
+                app._label(self.right, "처음이라면 아래 예시 세트를 골라 쓰거나 고쳐 쓰세요. 설치하지 않은 스킬은 적용할 때 건너뜁니다.\n"
+                           + "\n".join(lines), 10, fg=c["muted"], bg=c["bg"], anchor="w", justify="left",
+                           wraplength=app.px(self.W - 320)).pack(fill="x")
             self.say("")
             return
         assert self.project  # entry exists only for a selected project

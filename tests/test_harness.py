@@ -1,6 +1,7 @@
 """python -m unittest test_harness -v   (everything in a temp folder; no window, nothing of the real ~/.claude is touched)"""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -227,6 +228,51 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.proj.iterdir()), [".claude", "CLAUDE.md"])  # reading created nothing
         with self.assertRaises(mgr.ManagerError):
             h.guide_tree(str(self.t / "gone"))
+
+
+class ExampleSetsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        t = self.t = Path(self._tmp.name).resolve()
+        p = mock.patch.object(mgr, "STORE", t / "store")
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_made_once_and_not_again_after_the_user_deletes_them(self):
+        h.ensure_examples()
+        self.assertEqual(list(h.load()["sets"]), list(h.EXAMPLE_SETS))
+        for n in list(h.EXAMPLE_SETS):
+            h.delete_set(n)
+        h.ensure_examples()
+        self.assertEqual(h.load()["sets"], {})
+
+    def test_user_sets_are_left_alone_and_no_examples_follow_later(self):
+        h.save_set("mine", ["alpha"])
+        h.ensure_examples()
+        self.assertEqual(list(h.load()["sets"]), ["mine"])
+        h.delete_set("mine")
+        h.ensure_examples()
+        self.assertEqual(h.load()["sets"], {})
+
+    def test_uninstalled_skills_in_an_example_are_skipped_on_apply(self):
+        h.ensure_examples()
+        proj = self.t / "proj"
+        proj.mkdir()
+        key = h.add_project(proj)
+        h.configure_project(key, "문서 작업", ["Claude Code"])
+        with mock.patch.object(h, "find_source", return_value=None):
+            res = h.apply(key)
+        self.assertTrue(res and all(r.status == "missing" for r in res), res)
+        self.assertEqual(h.applied(key), [])
+
+    def test_examples_use_only_public_skill_names(self):
+        data = Path(h.__file__).parent / "data"
+        public = set()
+        for f in ("skill_notes.json", "skill_categories.json", "skill_recommend.json"):
+            public |= set(re.findall(r'"([a-z0-9][a-z0-9._-]*)"', (data / f).read_text(encoding="utf-8")))
+        used = {s for v in h.EXAMPLE_SETS.values() for s in v}
+        self.assertEqual(used - public, set())
 
 
 if __name__ == "__main__":
