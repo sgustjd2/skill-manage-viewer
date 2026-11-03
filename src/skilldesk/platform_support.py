@@ -26,6 +26,24 @@ FALLBACK_FONT = "Malgun Gothic" if WIN else "Apple SD Gothic Neo" if MAC else "T
 FONT_SCALE = 4 / 3 if MAC else 1.0
 
 
+# ---- tests ---------------------------------------------------------------------------------------
+TEST_DESKTOP_HIDDEN = False  # set by hide_test_desktop(); tests skip what needs the user's desktop (tray icon, screen grabs)
+
+
+def hide_test_desktop() -> bool:
+    """Windows only: attach this thread to a new invisible desktop so test windows never show up or steal focus. Call it
+    before the first Tk window. Does nothing on CI, on macOS, or with SKILLDESK_TEST_VISIBLE=1 (to watch the windows)."""
+    global TEST_DESKTOP_HIDDEN
+    if not WIN or os.environ.get("CI") or os.environ.get("SKILLDESK_TEST_VISIBLE"):
+        return False
+    user32 = ctypes.windll.user32
+    user32.CreateDesktopW.restype = ctypes.c_void_p
+    user32.SetThreadDesktop.argtypes = [ctypes.c_void_p]
+    desk = user32.CreateDesktopW(f"skilldesk-test-{os.getpid()}", None, None, 0, 0x10000000, None)  # GENERIC_ALL
+    TEST_DESKTOP_HIDDEN = bool(desk) and bool(user32.SetThreadDesktop(desk))
+    return TEST_DESKTOP_HIDDEN
+
+
 # ---- directory links -----------------------------------------------------------------------------
 def make_dir_link(link: Path, target: Path) -> None:
     """Junction on Windows (needs no admin rights), symlink elsewhere."""

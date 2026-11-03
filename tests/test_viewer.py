@@ -106,7 +106,8 @@ class PanelTest(unittest.TestCase):
         subprocess.run([*git, "add", "-A"], cwd=cls.repo, check=True, capture_output=True)
         subprocess.run([*git, "commit", "-qm", "init"], cwd=cls.repo, check=True, capture_output=True)
         mgr.install([cls.repo / "skills/gitskill"], ["Claude Code"])
-        cls.app = v.App(with_tray=plat.WIN, auto_update=False)  # the macOS tray is a child process; CI has no menu bar to show it in
+        # the macOS tray is a child process and CI has no menu bar; a hidden desktop has no shell for the tray icon
+        cls.app = v.App(with_tray=plat.WIN and not plat.TEST_DESKTOP_HIDDEN, auto_update=False)
         cls.app.INSTANCE = f"skill-catalog-test-{os.getpid()}"  # not "skilldesk": an app running on this PC must not get this app's notes
         cls.app.root.update()
 
@@ -136,7 +137,7 @@ class PanelTest(unittest.TestCase):
         time.sleep(0.7)  # let Windows finish its window fade-in, or the grab is half transparent
         win.update()
         box = (win.winfo_rootx(), win.winfo_rooty(), win.winfo_rootx() + win.winfo_width(), win.winfo_rooty() + win.winfo_height())
-        if plat.WIN:  # macOS asks for screen-recording permission, which a test run can not give
+        if plat.WIN and not plat.TEST_DESKTOP_HIDDEN:  # macOS asks for screen-recording permission; a hidden desktop grabs black
             ImageGrab.grab(bbox=box).save(SHOTS / f"{name}.png")
         return box
 
@@ -146,7 +147,7 @@ class PanelTest(unittest.TestCase):
     # ---- window, tray, list ---------------------------------------------------------------
     def test_01_centered_and_tray_toggle(self):
         app = self.app
-        if plat.WIN:
+        if plat.WIN and not plat.TEST_DESKTOP_HIDDEN:  # the tray needs the user's desktop shell
             self.assertTrue(app.tray is not None and app.tray.HAS_MENU)
         left, top, right, bottom = plat.work_area(app.root)
         app.place()
