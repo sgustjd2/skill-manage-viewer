@@ -99,7 +99,7 @@ jobs:
 
           Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
           foreach ($p in "SkillDesk.exe", "_internal\VERSION", "_internal\skilldesk\assets\fonts\Pretendard-Regular.otf",
-                         "_internal\skilldesk\data\skill_notes.json", "_internal\skilldesk\data\skill_recommend.json") {
+                         "_internal\skilldesk\data\skill_notes.json", "_internal\skilldesk\data\skill_recommend.json", "_internal\skilldesk\data\harness_guide.json") {
             if (-not (Test-Path (Join-Path $app $p))) { Fail "missing after install: $p" }
           }
           if ((Get-Content (Join-Path $app "_internal\VERSION")).Trim() -ne $v) { Fail "VERSION inside the exe is not $v" }
@@ -179,7 +179,7 @@ jobs:
 
           echo "CPU of the app: $(lipo -archs "$bin") (this machine: $(uname -m))"
           codesign --verify --deep --strict "$app" || fail "the ad-hoc signature does not verify"
-          for f in skilldesk/assets/fonts/Pretendard-Regular.otf skilldesk/data/skill_notes.json skilldesk/data/skill_recommend.json; do
+          for f in skilldesk/assets/fonts/Pretendard-Regular.otf skilldesk/data/skill_notes.json skilldesk/data/skill_recommend.json skilldesk/data/harness_guide.json; do
             [ -n "$(find "$app/Contents" -path "*/$f")" ] || fail "missing in the app: $f"
           done
           [ -n "$(find "$app/Contents" -maxdepth 3 -name VERSION -exec grep -lx "$v" {} +)" ] || fail "VERSION inside the app is not $v"

@@ -1,0 +1,47 @@
+{
+  "components": [
+    {"name": "CLAUDE.md", "where": ["./CLAUDE.md 또는 ./.claude/CLAUDE.md"], "note": "팀이 함께 쓰는 프로젝트 지침. 저장소에 커밋합니다."},
+    {"name": "CLAUDE.local.md", "where": ["./CLAUDE.local.md"], "note": "나만 쓰는 지침. .gitignore에 넣어 커밋하지 않습니다."},
+    {"name": "CLAUDE.md (사용자)", "where": ["~/.claude/CLAUDE.md"], "note": "모든 프로젝트에 적용되는 개인 취향."},
+    {"name": "AGENTS.md", "where": ["저장소 루트의 AGENTS.md"], "note": "Codex가 읽는 지침. Claude Code는 이 파일을 대신 읽을 수 있습니다."},
+    {"name": "스킬", "where": [".claude/skills/<이름>/SKILL.md", ".agents/skills/<이름>/SKILL.md (Codex)"], "note": "여러 단계 절차와 반복 작업을 담는 폴더."},
+    {"name": "설정 (팀)", "where": [".claude/settings.json"], "note": "허용·차단 명령 같은 팀 공통 설정. 커밋합니다."},
+    {"name": "설정 (개인)", "where": [".claude/settings.local.json"], "note": "나만 쓰는 설정. gitignore에 넣습니다."},
+    {"name": "설정 (사용자)", "where": ["~/.claude/settings.json"], "note": "모든 프로젝트에 적용되는 사용자 전역 설정."},
+    {"name": "MCP ※", "where": [".mcp.json (프로젝트 루트)"], "note": "프로젝트에서 쓸 MCP 서버 목록."}
+  ],
+  "caveat": "※ .mcp.json 위치는 공식 문서로 끝까지 확인하지 못해 제3자 가이드를 따랐습니다. 쓰기 전에 공식 문서로 한 번 더 확인하세요.",
+  "principles": [
+    "CLAUDE.md는 200줄 이하로 둡니다. 빌드·테스트 명령, 코드 규칙, 구조, '항상 할 것'만 적고, 여러 단계로 된 절차는 스킬로 옮깁니다.",
+    "스킬은 description을 구체적으로 씁니다. 무엇을 하는지보다 '언제 쓰는지'가 들어가야 에이전트가 알맞은 때 꺼냅니다.",
+    "설정은 필요한 명령만 allow에 넣고, 비밀 파일(.env)은 deny에 넣습니다.",
+    "우선순위는 개인 로컬 > 프로젝트 공유 > 사용자 전역입니다. 허용 목록(allow)은 덮어쓰지 않고 합쳐집니다.",
+    "처음에는 /init으로 초안을 만든 뒤 다듬습니다. /context로 CLAUDE.md가 실제로 읽혔는지, /status로 설정이 어디서 왔는지 확인합니다."
+  ],
+  "avoid": [
+    "CLAUDE.md에 긴 절차, 개인 취향, 비밀 값을 넣지 않습니다.",
+    "같은 내용을 CLAUDE.md와 스킬에 중복해서 적지 않습니다.",
+    "팀이 공유하는 설정 파일에 개인 경로나 계정 정보를 넣지 않습니다."
+  ],
+  "tree": "my-project/\n├─ CLAUDE.md\n├─ AGENTS.md\n├─ .mcp.json\n├─ .claude/\n│  ├─ settings.json\n│  ├─ settings.local.json\n│  └─ skills/\n│     └─ review/\n│        └─ SKILL.md\n└─ .agents/\n   └─ skills/",
+  "examples": [
+    {
+      "title": "CLAUDE.md 예시",
+      "body": "# my-project\n\n## 명령\n- 빌드: `npm run build`\n- 테스트: `npm test`\n\n## 구조\n- API 핸들러는 `src/api/handlers/`에 둡니다.\n\n## 규칙\n- 들여쓰기는 2칸입니다.\n- 새 코드에는 테스트를 함께 추가합니다.\n"
+    },
+    {
+      "title": "SKILL.md 예시 (.claude/skills/review/SKILL.md)",
+      "body": "---\nname: review\ndescription: 변경한 코드를 리뷰할 때 사용. 커밋 전이나 PR을 올리기 전에 diff의 버그, 빠진 테스트, 이름 규칙을 점검한다.\n---\n\n1. `git diff`로 바뀐 부분을 읽는다.\n2. 버그 가능성, 빠진 테스트, 이름 규칙 위반을 찾는다.\n3. 문제를 파일과 줄 번호로 정리해 보고한다.\n"
+    },
+    {
+      "title": "settings.json 예시 (.claude/settings.json)",
+      "body": "{\n  \"permissions\": {\n    \"allow\": [\"Bash(npm run test *)\"],\n    \"deny\": [\"Read(./.env)\"]\n  }\n}\n"
+    }
+  ],
+  "sources": [
+    {"title": "Claude Code 메모리 (CLAUDE.md)", "url": "https://code.claude.com/docs/en/memory"},
+    {"title": "Claude Code 스킬", "url": "https://code.claude.com/docs/en/skills"},
+    {"title": "Claude Code 설정", "url": "https://code.claude.com/docs/en/settings"},
+    {"title": "Codex 맞춤 설정", "url": "https://learn.chatgpt.com/docs/customization/overview"}
+  ]
+}

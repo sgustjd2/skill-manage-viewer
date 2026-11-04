@@ -100,7 +100,7 @@ skill-manage-viewer/
 │  ├─ skill_viewer.py       화면: 창, 탭, 카테고리 목록, 스킬 줄, 메뉴, 추가 대화상자, 트레이, 색·글꼴. `main()`이 시작점
 │  ├─ skill_manager.py      일: 링크 해석, git 받기, 설치·업데이트·삭제·생성, SKILL.md 읽기·저장(`read_skill_md`/`save_skill_md`), 메모·설정 저장 (Tk 없음)
 │  ├─ skill_agent.py        에이전트(Claude Code)에게 스킬을 만들게 함: 임시 폴더에서 실행·시간 제한·취소, 결과 검사(Draft), 미리보기 뒤 설치 (Tk 없음)
-│  ├─ skill_harness.py      프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리 (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
+│  ├─ skill_harness.py      프로젝트 하네스: 세트·프로젝트 저장(`harness.json`), 적용·해제(링크 기록으로 이 앱이 만든 것만 지움), 구조 가이드 트리, 세팅 가이드 글 읽기 `load_guide`(`data/harness_guide.json`) (Tk 없음). 화면은 `skill_viewer.py`의 `HarnessWindow`
 │  ├─ skill_usage.py        Claude Code 대화 기록(.jsonl)에서 달별 스킬 호출 횟수 집계, 최근 2개월 안 쓴 스킬(정리 후보) 계산 (Tk 없음, 파일별 캐시)
 │  ├─ platform_support.py   OS마다 다른 것: 폴더 링크, 파일 열기, 화면 영역, 글꼴 로드, 중복 실행 방지
 │  ├─ install.py            시작 메뉴 바로 가기 / macOS .app 만들기·지우기

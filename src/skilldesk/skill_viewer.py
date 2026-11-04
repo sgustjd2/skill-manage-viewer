@@ -1995,12 +1995,13 @@ class HarnessWindow:
         app._button(ends, "닫기", self.close, primary=True).pack(side="right")
         tk.Frame(win, height=1, bg=c["line"]).pack(side="bottom", fill="x")
 
-        bar, self._restyle = app._tab_bar(win, ["세트 편집", "구조 가이드"], self.show_page)
+        bar, self._restyle = app._tab_bar(win, ["세트 편집", "구조 가이드", "세팅 가이드"], self.show_page)
         bar.pack(fill="x")
         tk.Frame(win, height=1, bg=c["line"]).pack(fill="x")
         body = self.sets_page = tk.Frame(win, bg=c["bg"])
         body.pack(fill="both", expand=True)
         self.guide_page = tk.Frame(win, bg=c["bg"])
+        self.howto_page = tk.Frame(win, bg=c["bg"])
         left = tk.Frame(body, bg=c["rail"], width=app.px(250))
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
@@ -2135,8 +2136,12 @@ class HarnessWindow:
         self._restyle(name)
         self.sets_page.pack_forget()
         self.guide_page.pack_forget()
+        self.howto_page.pack_forget()
         if name == "세트 편집":
             self.sets_page.pack(fill="both", expand=True)
+        elif name == "세팅 가이드":
+            self.howto_page.pack(fill="both", expand=True)
+            self.draw_howto()
         else:
             self.guide_page.pack(fill="both", expand=True)
             self.draw_guide()
@@ -2187,6 +2192,68 @@ class HarnessWindow:
             text.insert("end", f"{mark}  ", (state,) if state else ())
             text.insert("end", r["note"] + "\n", ("note",))
         text.configure(state="disabled")
+
+    def draw_howto(self) -> None:
+        """Read-only how-to (text from data/harness_guide.json): components, principles, example tree, copyable example files."""
+        app, c = self.app, self.app.c
+        for w in self.howto_page.winfo_children():
+            w.destroy()
+        g = hn.load_guide()
+        size = round(10 * plat.FONT_SCALE)
+        mono = (plat.MONO_FONT, size, "normal", "roman")
+        body = (app.f(10)[0], size, "normal", "roman")
+        bold = (body[0], size, "bold", "roman")
+        text = tk.Text(self.howto_page, font=body, bg=c["bg"], fg=c["text"], relief="flat", highlightthickness=0,
+                       wrap="word", cursor="arrow", padx=20, pady=12, spacing3=3)
+        bar = tk.Scrollbar(self.howto_page, command=text.yview)
+        text.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+        text.tag_config("h", font=(body[0], size + 2, "bold", "roman"), spacing1=14, spacing3=6)
+        text.tag_config("name", font=bold, spacing1=6, lmargin1=8, lmargin2=8)
+        text.tag_config("path", font=mono, foreground=c["accent"], lmargin1=24, lmargin2=24)
+        text.tag_config("note", foreground=c["muted"], lmargin1=24, lmargin2=24)
+        text.tag_config("item", lmargin1=8, lmargin2=24)
+        text.tag_config("code", font=mono, background=c["surface"], lmargin1=10, lmargin2=10, spacing3=0)
+        text.tag_config("link", foreground=c["accent"], underline=True, lmargin1=8)
+
+        def head(t: str) -> None:
+            text.insert("end", t + "\n", ("h",))
+
+        head("구성 요소 — 무엇을 어디에 두나")
+        for comp in g["components"]:
+            text.insert("end", comp["name"] + "\n", ("name",))
+            for where in comp["where"]:
+                text.insert("end", where + "\n", ("path",))
+            text.insert("end", comp["note"] + "\n", ("note",))
+        text.insert("end", g["caveat"] + "\n", ("note",))
+        head("원칙")
+        for line in g["principles"]:
+            text.insert("end", "• " + line + "\n", ("item",))
+        head("하지 말 것")
+        for line in g["avoid"]:
+            text.insert("end", "• " + line + "\n", ("item",))
+        head("예시 구조")
+        text.insert("end", g["tree"] + "\n", ("code",))
+        head("예시 파일")
+        for ex in g["examples"]:
+            text.insert("end", ex["title"] + "  ", ("name",))
+            btn = app._button(text, "복사", lambda ex=ex: self.copy_example(ex))
+            text.window_create("end", window=btn)
+            text.insert("end", "\n" + ex["body"], ("code",))
+        head("출처")
+        for n, src in enumerate(g["sources"]):
+            tag = f"src{n}"
+            text.insert("end", f"{src['title']}  {src['url']}\n", ("link", tag))
+            text.tag_bind(tag, "<Button-1>", lambda e, u=src["url"]: webbrowser.open(u))
+            text.tag_bind(tag, "<Enter>", lambda e: text.config(cursor="hand2"))
+            text.tag_bind(tag, "<Leave>", lambda e: text.config(cursor="arrow"))
+        text.configure(state="disabled")
+
+    def copy_example(self, ex: dict) -> None:
+        self.app.root.clipboard_clear()
+        self.app.root.clipboard_append(ex["body"])
+        self.say(f"복사됨: {ex['title']}")
 
     # ---- choices --------------------------------------------------------------------------------
     def select_project(self, path: str) -> None:

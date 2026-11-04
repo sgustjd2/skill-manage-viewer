@@ -106,6 +106,14 @@ def save_set(name: str, skills: list[str]) -> None:
     save(data)
 
 
+GUIDE = Path(__file__).parent / "data" / "harness_guide.json"
+
+
+def load_guide() -> dict:
+    """The bundled how-to text for the 세팅 가이드 tab (components, principles, example files, sources)."""
+    return json.loads(GUIDE.read_text(encoding="utf-8"))
+
+
 def ensure_examples() -> None:
     """First use only: add EXAMPLE_SETS when there is no set yet. The flag stays, so deleted examples never come back."""
     data = load()
