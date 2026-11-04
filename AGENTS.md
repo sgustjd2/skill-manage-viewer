@@ -38,7 +38,7 @@
 | 앱 자신의 업데이트 (git 클론: 자동 / exe·dmg: 설치 파일을 받아 해시 확인 뒤 교체 / ZIP: 새 버전 알림만) | `skill_update.py` / `self_update.py` / `update_check.py` |
 | Windows 설치 파일(exe) 빌드, 자동 업데이트 시험 | `tools/build_exe.py`, `tools/skilldesk.iss`, `tools/update_e2e.ps1`, `release.yml`의 `exe` 작업 |
 | macOS 앱(.app을 담은 dmg) 빌드, `SHA256SUMS.txt`와 릴리스 공개 | `tools/build_mac.py`, `tools/update_e2e.sh`, `release.yml`의 `mac`·`publish` 작업 |
-| 프로젝트별 스킬 세트(저장·적용·해제·구조 트리), 그 창 | `skill_harness.py`, `skill_viewer.py` – `HarnessWindow` |
+| 프로젝트별 스킬 세트(저장·적용·해제·구조 트리), 그 창 | `skill_harness.py`, `skill_viewer.py` – `HarnessWindow` (세팅 가이드 글: `data/harness_guide.json`) |
 | Windows/macOS 차이(링크, 파일 열기, 글꼴, 화면 영역) | `platform_support.py` |
 | 카테고리 정의, 스킬별 한국어 설명 | `data/skill_categories.json`, `data/skill_notes.json` |
 | 추천 탭의 목록(읽기 `load_recommended`, 새로 만들기 `tools/update_recommend.py`) | `skill_manager.py`, `data/skill_recommend.json` |

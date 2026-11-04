@@ -274,6 +274,14 @@ class ExampleSetsTest(unittest.TestCase):
         used = {s for v in h.EXAMPLE_SETS.values() for s in v}
         self.assertEqual(used - public, set())
 
+    def test_guide_data_has_every_part(self):
+        g = h.load_guide()
+        self.assertGreaterEqual(len(g["components"]), 5)
+        self.assertTrue(g["principles"] and g["avoid"] and g["tree"] and g["caveat"])
+        self.assertEqual(len(g["examples"]), 3)
+        self.assertEqual(len(g["sources"]), 4)
+        self.assertTrue(all(s["url"].startswith("https://") for s in g["sources"]))
+
 
 if __name__ == "__main__":
     unittest.main()

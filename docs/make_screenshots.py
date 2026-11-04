@@ -259,6 +259,8 @@ def main() -> None:
             (t / "work/web-shop/CLAUDE.md").write_text("# web-shop\n", encoding="utf-8")
             app.dialog.show_page("구조 가이드")
             shot(app.dialog.win, "harness-guide")
+            app.dialog.show_page("세팅 가이드")
+            shot(app.dialog.win, "harness-howto")
             hn.release(web)  # unlink before the temp folder is removed
             app.dialog.close()
 

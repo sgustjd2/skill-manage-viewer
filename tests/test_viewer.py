@@ -1594,6 +1594,15 @@ class PanelTest(unittest.TestCase):
         self.assertTrue(mgr.is_link(link))
         self.assertIn("새로 연결 1개", w.status.cget("text"))
         self.assertNotIn("harness-demo", exclude.read_text(encoding="utf-8") if exclude.is_file() else "")  # opt-in only
+        w.show_page("세팅 가이드")  # how-to text; each example file has a copy button
+        w.app.root.update()
+        howto = next(x for x in walk(w.howto_page) if isinstance(x, tk.Text))
+        self.assertIn("구성 요소", howto.get("1.0", "end"))
+        example = hn.load_guide()["examples"][0]
+        w.copy_example(example)
+        self.assertEqual(app.root.clipboard_get(), example["body"])
+        copies = [x for x in walk(howto) if x.winfo_class() == "Label" and x.cget("text") == "복사"]
+        self.assertEqual(len(copies), 3)
         w.show_page("구조 가이드")  # read-only tree of the project: our link marked, the user's own file only "있음"
         (proj / "CLAUDE.md").write_text("x", encoding="utf-8")
         w.draw_guide()
