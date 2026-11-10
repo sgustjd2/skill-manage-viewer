@@ -9,14 +9,14 @@
   {
     "name": "구현·테스트",
     "about": "정한 계획을 코드와 테스트로 옮길 때",
-    "keywords": "tdd|test|implement|execut|subagent|parallel",
+    "keywords": "tdd|test|implement|execut|subagent|parallel|react|refactor|coding",
     "skills": ["tdd", "test-driven-development", "executing-plans", "subagent-driven-development",
                "dispatching-parallel-agents", "ponytail"]
   },
   {
     "name": "디버깅·검증",
     "about": "문제의 원인을 찾거나, 끝내기 전에 실제로 동작하는지 확인할 때",
-    "keywords": "debug|diagnos|verif|reverse-engineer|troubleshoot",
+    "keywords": "debug|diagnos|verif|reverse-engineer|troubleshoot|root.cause|crash|bugs?\b|regress|prove|really work|actually work",
     "skills": ["systematic-debugging", "diagnosing-superpowers", "verification-before-completion",
                "reverse-engineer-anything"]
   },
@@ -37,7 +37,7 @@
   {
     "name": "UI·디자인",
     "about": "화면·브랜드·이미지 같은 시각물을 만들거나 고치거나 점검할 때",
-    "keywords": "design|\\bui\\b|ux|brand|banner|theme|frontend|figma|canvas|styling|polish|image|visual|css",
+    "keywords": "design|\\bui\\b|ux|brand|banner|theme|frontend|figma|canvas|styling|polish|image|visual|css|interface|layout|typograph|aesthetic|color",
     "skills": ["banner-design", "brand", "brand-guidelines", "canvas-design", "design", "design-system",
                "design-taste-frontend", "frontend-design", "generative_ui", "impeccable", "theme-factory", "ui-styling", "ui-ux-pro-max", "web-artifacts-builder",
                "web-design-guidelines", "imagegen"]

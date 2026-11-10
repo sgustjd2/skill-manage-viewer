@@ -12,13 +12,18 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
 import time
+import urllib.error
+import urllib.request
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from . import platform_support as plat
 
@@ -42,6 +47,10 @@ class ManagerError(Exception):
     """A failure whose message is fit to show the user as-is."""
 
 
+NO_GIT = ("Git이 설치돼 있지 않습니다. https://git-scm.com 에서 설치한 뒤 SkillDesk를 다시 켜 주세요. "
+          "(github.com 링크는 Git 없이도 설치할 수 있습니다)")
+
+
 # ---- small helpers ------------------------------------------------------------------------------
 def run(cmd: list[str], timeout: int = 180) -> str:
     try:
@@ -49,9 +58,23 @@ def run(cmd: list[str], timeout: int = 180) -> str:
                            timeout=timeout, creationflags=plat.NO_WINDOW, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     except subprocess.TimeoutExpired:
         raise ManagerError(f"시간 초과: {' '.join(cmd[:4])}…") from None
+    except FileNotFoundError:
+        raise ManagerError(NO_GIT) from None
     if r.returncode:
-        raise ManagerError((r.stderr or r.stdout).strip() or f"실패: {' '.join(cmd[:4])}")
+        raise ManagerError(explain_git((r.stderr or r.stdout).strip()) or f"실패: {' '.join(cmd[:4])}")
     return r.stdout.strip()
+
+
+def explain_git(msg: str) -> str:
+    """git's English complaint -> a Korean sentence saying what is wrong, followed by git's own last line."""
+    low, last = msg.lower(), msg.splitlines()[-1] if msg else ""
+    if "remote branch" in low:
+        return f"그 브랜치(태그)를 찾지 못했습니다. ({last})"
+    if "not found" in low or "could not read username" in low or "authentication failed" in low:
+        return f"저장소를 찾지 못했습니다. 주소가 틀렸거나 비공개 저장소일 수 있습니다. ({last})"
+    if "could not resolve host" in low or "unable to access" in low:
+        return f"네트워크에 연결하지 못했습니다. 인터넷 연결을 확인하세요. ({last})"
+    return msg
 
 
 def git(repo: Path, *args: str) -> str:
@@ -136,22 +159,115 @@ def parse_link(text: str) -> tuple[str, str | None, str | None]:
     return f"https://{u.netloc}/{m['repo']}", m["ref"], path
 
 
+ZIP_HOSTS = frozenset({"github.com", "codeload.github.com"})  # the only hosts a GitHub zip download may touch
+ZIP_MAX_BYTES = 100_000_000  # the zip itself and, separately, what it unpacks to
+ZIP_MAX_FILES = 20_000
+ZIP_SECONDS = 300
+
+
+class _ZipRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        u = urlsplit(newurl)
+        if u.scheme != "https" or u.hostname not in ZIP_HOSTS:
+            raise ManagerError(f"허용되지 않은 주소로 넘어가려 해서 멈췄습니다 ({u.hostname})")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def download_zip(url: str, dest: Path) -> None:
+    """Save a GitHub archive to dest (https, GitHub hosts only, size and time limited)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "SkillDesk"})
+    size, end = 0, time.monotonic() + ZIP_SECONDS
+    try:
+        with urllib.request.build_opener(_ZipRedirects).open(req, timeout=20) as r, open(dest, "wb") as f:
+            while chunk := r.read(1 << 16):
+                size += len(chunk)
+                if size > ZIP_MAX_BYTES:
+                    raise ManagerError("저장소가 너무 커서(100MB 초과) 내려받기를 멈췄습니다")
+                if time.monotonic() > end:
+                    raise ManagerError("내려받는 데 너무 오래 걸려 멈췄습니다")
+                f.write(chunk)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404):
+            raise ManagerError("저장소 또는 브랜치를 찾지 못했습니다. 주소가 틀렸거나 비공개 저장소일 수 있습니다 "
+                               "(비공개 저장소는 Git이 필요합니다)") from e
+        raise ManagerError(f"GitHub에서 내려받지 못했습니다 (HTTP {e.code})") from e
+    except OSError as e:  # URLError, timeouts, a full disk
+        raise ManagerError(f"내려받지 못했습니다. 인터넷 연결을 확인하세요. ({e})") from e
+
+
+def unzip_safely(zpath: Path, out: Path) -> Path:
+    """Unpack a GitHub archive into the empty folder `out` -> its single top folder. Refuses paths that
+    leave `out`, links, too many files and too much data."""
+    try:
+        z = zipfile.ZipFile(zpath)
+    except zipfile.BadZipFile:
+        raise ManagerError("받은 파일이 zip이 아닙니다") from None
+    with z:
+        infos = z.infolist()
+        if len(infos) > ZIP_MAX_FILES or sum(i.file_size for i in infos) > ZIP_MAX_BYTES:
+            raise ManagerError("저장소가 너무 커서 풀지 않았습니다")
+        root = out.resolve()
+        for i in infos:
+            if stat.S_ISLNK(i.external_attr >> 16):
+                raise ManagerError(f"링크가 들어 있는 압축 파일이라 풀지 않았습니다: {i.filename}")
+            if i.filename.startswith(("/", "\\")) or not (root / i.filename).resolve().is_relative_to(root):
+                raise ManagerError(f"안전하지 않은 경로가 들어 있어 풀지 않았습니다: {i.filename}")
+        left = ZIP_MAX_BYTES  # the sizes a zip declares can lie, so count what really comes out
+        for i in infos:
+            target = root / i.filename
+            if i.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(i) as src, open(target, "wb") as dst:
+                while chunk := src.read(1 << 16):
+                    left -= len(chunk)
+                    if left < 0:
+                        raise ManagerError("저장소가 너무 커서 풀지 않았습니다")
+                    dst.write(chunk)
+    tops = [d for d in out.iterdir() if d.is_dir()]
+    if len(tops) != 1:
+        raise ManagerError("받은 압축 파일의 구조를 알 수 없습니다")
+    return tops[0]
+
+
+def fetch_zip(url: str, ref: str | None, dest: Path) -> None:
+    """No Git: take a public GitHub repo as a zip into `dest` (replacing an earlier copy of the same link)."""
+    if urlsplit(url).hostname != "github.com":
+        raise ManagerError("Git이 설치돼 있지 않습니다. github.com이 아닌 주소는 https://git-scm.com 에서 Git을 설치해야 받을 수 있습니다")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".part-") as tmp:
+        zpath, out = Path(tmp) / "src.zip", Path(tmp) / "out"
+        out.mkdir()
+        download_zip(f"{url}/archive/{ref or 'HEAD'}.zip", zpath)
+        top = unzip_safely(zpath, out)
+        if dest.exists():
+            shutil.rmtree(dest)  # a copy this function made earlier (a git clone has .git and never gets here)
+        shutil.move(str(top), dest)
+
+
 def fetch(text: str) -> tuple[Path, Path]:
-    """Clone (or freshen) the repo behind a link -> (clone dir, folder to look for skills in)."""
+    """Clone (or freshen) the repo behind a link -> (clone dir, folder to look for skills in). Without Git a github.com
+    repo comes as a zip instead (no history, so no update check: opening the same link again downloads it afresh)."""
     url, ref, sub = parse_link(text)
     p = urlparse(url)
     key = re.sub(r"[^\w.-]+", "__", f"{p.netloc}/{p.path.strip('/')}") + (f"@{ref}" if ref else "")
     dest = STORE / "sources" / key
-    if (dest / ".git").exists():
-        git(dest, "pull", "--ff-only", "-q")
-    else:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "clone", "--depth", "1", "-q"]
-        try:
-            run(cmd + (["--branch", ref] if ref else []) + ["--", url, str(dest)])
-        except ManagerError:
-            shutil.rmtree(dest, ignore_errors=True)  # only ever a partial clone we just started
-            raise
+    try:
+        if (dest / ".git").exists():
+            git(dest, "pull", "--ff-only", "-q")
+        elif shutil.which("git") is None:
+            fetch_zip(url, ref, dest)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            cmd = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "clone", "--depth", "1", "-q"]
+            try:
+                run(cmd + (["--branch", ref] if ref else []) + ["--", url, str(dest)])
+            except ManagerError:
+                shutil.rmtree(dest, ignore_errors=True)  # only ever a partial clone we just started
+                raise
+    except OSError as e:
+        raise ManagerError(f"저장소를 저장하지 못했습니다: {e}") from e
     root = dest / sub if sub else dest
     if not root.resolve().is_relative_to(dest.resolve()) or not root.is_dir():
         raise ManagerError(f"저장소 안에 '{sub}' 경로가 없습니다")
@@ -242,7 +358,10 @@ def install(skill_dirs: list[Path], agents: list[str], replace: bool = False) ->
                     continue
                 drop(link)
                 status = "replaced"
-            link.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                link.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise ManagerError(f"{agent} 스킬 폴더를 만들지 못했습니다: {link.parent} ({e})") from e
             make_link(link, src)
             out.append(Result(agent, src.name, status))
     return out
