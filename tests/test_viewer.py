@@ -907,6 +907,7 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(legacy[0], "상세 보기")
         self.assertIn("삭제…", legacy)
         self.assertIn("SKILL.md 수정…", legacy)
+        self.assertIn("카테고리 바꾸기…", legacy)
         self.assertIn("이 스킬의 저장소 업데이트 확인", labels(find(app, "Claude Code", "gitskill")))
         ro = next(s for s in app.data["Claude Code"] if not s["managed"])
         self.assertNotIn("삭제…", labels(ro))  # plugin / app-synced skills can't be deleted from here

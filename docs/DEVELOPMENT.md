@@ -167,6 +167,8 @@ skill-manage-viewer/
 **설치가 일어나는 방식** (`skill_manager`)
 
 - 링크 → `parse_link()`(https만, 경로 검사) → `fetch()`가 `~/.skill-manager/sources/`에 얕은 clone(`protocol.allow=never`) → `discover()`로 스킬 폴더 찾기 → `install()`이 각 에이전트 폴더에 **링크**를 만듭니다.
+- **Git이 없으면**(`shutil.which("git")`) github.com 링크만 `fetch_zip()`이 `https://github.com/<repo>/archive/<ref>.zip`을 받아 같은 `sources/` 폴더에 풉니다. 다운로드는 https·`github.com`/`codeload.github.com`만(리다이렉트도 검사), 100MB·300초 상한이고, `unzip_safely()`가 경로 이탈·심볼릭 링크·파일 20,000개 초과·실제로 풀린 용량 초과를 막습니다. `.git`이 없으니 출처는 "링크"로 보이고 업데이트 확인은 없습니다. 같은 링크를 다시 설치하면 새 zip으로 폴더를 바꿉니다. 그 밖의 호스트·비공개 저장소는 "Git이 필요합니다"라는 `ManagerError`로 끝납니다. `git`/`run`의 `FileNotFoundError`와 `install`의 `OSError`는 모두 `ManagerError`(한국어)로 바뀌어 대화상자에 그대로 보입니다.
+- 카테고리: 목록에 없는 스킬은 `categorize()`가 이름(3점)·설명(1점)에서 찾은 서로 다른 키워드 수로 점수를 매겨 가장 높은 곳에 넣습니다. 틀리면 스킬 메뉴의 "카테고리 바꾸기…"로 고치고, `~/.skill-manager/settings.json`의 `categories`에 저장됩니다. 시험 자료는 `tests/test_categorize.py`.
 - 복사하지 않으므로 업데이트는 원본 clone에서 `git pull --ff-only` 한 번이면 됩니다(`update()`). 폴더가 옮겨졌으면 `relink()`가 다시 연결합니다.
 - 삭제(`remove()`)는 링크면 끊고, 실제 폴더면 `trash/`로 옮깁니다. **영구 삭제 코드는 없습니다.**
 

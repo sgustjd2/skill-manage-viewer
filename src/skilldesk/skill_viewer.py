@@ -103,13 +103,18 @@ def tilde(p: Path) -> str:
 
 
 def categorize(name: str, desc: str) -> str:
+    """A listed skill keeps its category. Any other is scored: each distinct keyword found in the name counts 3, each in the
+    description 1, so one stray word in a long description can't outvote what the skill is about. A tie goes to the category
+    listed first in skill_categories.json."""
     if cat := CATEGORY_OF.get(name) or CATEGORY_OF.get(name.split(":")[-1]):
         return cat
-    for text in (name.lower(), desc.lower()):
-        for cat, rx in CATEGORIES:
-            if re.search(rx, text):
-                return cat
-    return OTHER
+    n, d = name.lower(), desc.lower()
+    best, top = OTHER, 0
+    for cat, rx in CATEGORIES:
+        score = 3 * len(set(re.findall(rx, n))) + len(set(re.findall(rx, d)))
+        if score > top:
+            best, top = cat, score
+    return best
 
 
 def brief(name: str, desc: str, user_notes: dict[str, str] | None = None) -> str:
@@ -197,8 +202,10 @@ def collect(agent: str) -> list[dict]:
                 describe_origin(s, kind, root)
                 seen[s["name"]] = s | {"agent": agent}
     skills = sorted(seen.values(), key=lambda s: s["name"].lower())
+    mine = mgr.load_settings().get("categories")  # the user's own picks, name -> category (menu: 카테고리 바꾸기…)
+    mine = mine if isinstance(mine, dict) else {}
     for s in skills:
-        s["cat"] = categorize(s["name"], s["desc"])
+        s["cat"] = mine[s["name"]] if mine.get(s["name"]) in CAT_COLORS else categorize(s["name"], s["desc"])
         s["note"] = brief(s["name"], s["desc"], notes)
     return skills
 
@@ -1045,6 +1052,7 @@ class App:
             ("★ 자주 쓰는 스킬에서 해제" if starred else "★ 자주 쓰는 스킬에 추가", lambda: self.toggle_pin(s), ""),
             ("", None, "-"),
             ("용도 설명 수정…", lambda: self.edit_note(s), ""),
+            ("카테고리 바꾸기…", lambda: self.pick_category(s), ""),
             ("SKILL.md 수정…" if s["managed"] else "SKILL.md 보기", lambda: self.detail(s, page="SKILL.md", edit=s["managed"]), ""),
             ("", None, "-"),
         ]
@@ -1055,6 +1063,25 @@ class App:
         else:
             items.append((f"{s['origin']} 제공 스킬이라 여기서 삭제할 수 없습니다", None, "note"))
         return items
+
+    def pick_category(self, s: dict) -> None:
+        """A second menu at the pointer listing the categories; the pick is kept in settings.json and wins over categorize()."""
+        x, y = self.root.winfo_pointerxy()
+        names = [c["name"] for c in CATALOG] + [OTHER]
+        items: list[tuple[str, object, str]] = [
+            (("✓ " if n == s["cat"] else "") + n, lambda n=n: self.set_category(s, n), "") for n in names]
+        items += [("", None, "-"), ("자동 분류로 되돌리기", lambda: self.set_category(s, None), "")]
+        self.popup = Popup(self, items, x, y)
+
+    def set_category(self, s: dict, cat: str | None) -> None:
+        mine = mgr.load_settings().get("categories")
+        mine = dict(mine) if isinstance(mine, dict) else {}
+        if cat:
+            mine[s["name"]] = cat
+        else:
+            mine.pop(s["name"], None)
+        mgr.save_setting("categories", mine)
+        self.load()
 
     def row_menu(self, s: dict, x: int, y: int) -> None:
         self.close_popup()
